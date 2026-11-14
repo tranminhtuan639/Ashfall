@@ -27,6 +27,38 @@
     return mesh;
   }
 
+  function bindDefenseRig(data, mesh) {
+    const jointIds = new Set(data.skin);
+    const nodes = data.nodes.map((node, index) => {
+      const object = node.mesh === 0 ? mesh : jointIds.has(index) ? new lt.Bone() : new lt.Group();
+      object.name = node.name;
+      if (node.translation) object.position.fromArray(node.translation);
+      if (node.rotation) object.quaternion.fromArray(node.rotation);
+      if (node.scale) object.scale.fromArray(node.scale);
+      return object;
+    });
+    data.nodes.forEach((node, index) => {
+      for (const child of node.children || []) nodes[index].add(nodes[child]);
+    });
+    const rig = nodes[data.root];
+    rig.updateMatrixWorld(true);
+    const inverse = new Float32Array(assetBytes(data.inverseBinds));
+    mesh.bind(new lt.Skeleton(data.skin.map(index => nodes[index]),
+      data.skin.map((_, index) => new lt.Matrix4().fromArray(inverse, index * 16))), mesh.matrixWorld);
+    const mixer = new lt.AnimationMixer(rig);
+    const actions = new Map(data.clips.map(clip => {
+      const tracks = clip.tracks.map(track => {
+        const rotation = track.path === "rotation";
+        const Track = rotation ? lt.QuaternionKeyframeTrack : lt.VectorKeyframeTrack;
+        return new Track(nodes[track.node].uuid + (rotation ? ".quaternion" : ".position"),
+          new Float32Array(assetBytes(track.times)), new Float32Array(assetBytes(track.values)),
+          track.step ? lt.InterpolateDiscrete : lt.InterpolateLinear);
+      });
+      return [clip.name, mixer.clipAction(new lt.AnimationClip(clip.name, -1, tracks))];
+    }));
+    return { rig, mixer, actions };
+  }
+
   async function setupRaptorDefense(game) {
     const [truckMesh, raptorMesh] = await Promise.all([
       loadDefenseMesh(supplyTruckData),
@@ -44,41 +76,12 @@
     const truckBounds = new lt.Box3().setFromObject(truck);
     game.physics.addBox(truckBounds.min, truckBounds.max, { surface: "metal", tag: "supply truck" });
 
-    const data = tekRaptorData;
-    const jointIds = new Set(data.skin);
-    const nodes = data.nodes.map((node, index) => {
-      const object = node.mesh === 0 ? raptorMesh : jointIds.has(index) ? new lt.Bone() : new lt.Group();
-      object.name = node.name;
-      if (node.translation) object.position.fromArray(node.translation);
-      if (node.rotation) object.quaternion.fromArray(node.rotation);
-      if (node.scale) object.scale.fromArray(node.scale);
-      return object;
-    });
-    data.nodes.forEach((node, index) => {
-      for (const child of node.children || []) nodes[index].add(nodes[child]);
-    });
-    const rig = nodes[data.root];
-    rig.updateMatrixWorld(true);
-    const inverse = new Float32Array(assetBytes(data.inverseBinds));
-    raptorMesh.bind(new lt.Skeleton(data.skin.map(index => nodes[index]),
-      data.skin.map((_, index) => new lt.Matrix4().fromArray(inverse, index * 16))), raptorMesh.matrixWorld);
+    const { rig, mixer, actions } = bindDefenseRig(tekRaptorData, raptorMesh);
     const model = new lt.Group();
     model.add(rig);
     model.scale.setScalar(9);
     model.visible = false;
     game.scene.add(model);
-
-    const mixer = new lt.AnimationMixer(rig);
-    const actions = new Map(data.clips.map(clip => {
-      const tracks = clip.tracks.map(track => {
-        const rotation = track.path === "rotation";
-        const Track = rotation ? lt.QuaternionKeyframeTrack : lt.VectorKeyframeTrack;
-        return new Track(nodes[track.node].uuid + (rotation ? ".quaternion" : ".position"),
-          new Float32Array(assetBytes(track.times)), new Float32Array(assetBytes(track.values)),
-          track.step ? lt.InterpolateDiscrete : lt.InterpolateLinear);
-      });
-      return [clip.name, mixer.clipAction(new lt.AnimationClip(clip.name, -1, tracks))];
-    }));
     let activeAction;
     function play(name, duration, hold = false) {
       mixer.stopAllAction();

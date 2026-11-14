@@ -6,7 +6,7 @@
   //  All the numbers you are likely to tweak live in COLOSSEUM.
   // ===========================================================================
   const COLOSSEUM = {
-    A: 42.5, B: 25,            // floor semi-axes -> 85 x 50 m
+    A: 51, B: 30,            // floor semi-axes -> 85 x 50 m
     PODIUM_H: 3.4,             // height of the wall round the floor (blocks bullets + players)
     PODIUM_T: 1.4,             // its thickness
     TIERS: 20, RISE: 0.85, RUN: 1.35,

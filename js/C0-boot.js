@@ -144,6 +144,7 @@
         (await Nr("Dựng khán đài", 0.34),
         await r("level", "level", () => buildColosseum(t), !0),
         await r("defense", "defense", () => setupRaptorDefense(t), !0),
+        await r("giga", "giga", () => setupGiganotosaurus(t), !0),
         await Nr("Chuẩn bị sân", 0.5),
         await r("backdrop", "backdrop", () => dr.backdrop()),
         await Nr("Tạo nền ướt", 0.58),

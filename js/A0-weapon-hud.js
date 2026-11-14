@@ -2568,8 +2568,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
   }
   var gi = W,
     fm = Lt,
-    Gv = 30,
-    B_ = 150,
+    Gv = 50,
+    B_ = 250,
     O_ = 720,
     H_ = 26,
     V_ = 300,

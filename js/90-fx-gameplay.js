@@ -3424,8 +3424,128 @@ void main() {
           }
         }
       }));
+    // ---- flameJet: continuous, AAA-style flame breath (called every frame while the jet is active) ----
+    // Layers: (1) alpha-blended emissive fire lobes (hot core + orange skin + soot), (2) additive glow flipbooks so bloom
+    // picks it up, (3) rising embers, (4) dark billowing smoke at the tail, (5) mouth flare, (6) flickering dynamic light
+    // that follows the jet, (7) impact fire + scorch decal + lingering ground fire where the jet hits a surface.
+    const jetAcc = [0, 0, 0, 0, 0], jetFwd = new W(), jetV = new W(), jetHit = new W(), jetN = new W();
+    let jetLight = null, jetIdle = 9, jetT = 0, jetGround = 0, jetScorch = 0;
+    function jetLobe(x, y, z, vx, vy, vz, life, s0, s1, core, rise, shade) {
+      const id = l.emit(x, y, z, vx, vy, vz, life, s0, s1);
+      if (id < 0) return -1;
+      const k = Ze(0.85, 1.15);
+      l.frame[id] = ht() < 0.2 ? 7 : (ht() * 6) | 0;
+      l.ramp[id] = 2;
+      l.r[id] = (core ? 8 : 5.6) * k;
+      l.g[id] = (core ? 5 : 2.3) * k;
+      l.b[id] = (core ? 1.8 : 0.5) * k;
+      l.a[id] = 0.95;
+      l.shade[id] = 2 + shade;
+      l.drag[id] = core ? 1.2 : 1.6;
+      l.grav[id] = -rise;
+      l.wind[id] = 0.6;
+      l.turb[id] = 1.8;
+      l.rot[id] = ht() * 6.283;
+      l.rotv[id] = (ht() - 0.5) * 3;
+      l.sk[id] = 2;
+      l.fin[id] = 0.05;
+      l.fout[id] = 0.55;
+      return id;
+    }
+    function flameJet(origin, dir, o = {}) {
+      const dt = Math.min(o.dt || 1 / 60, 0.1), reach = Math.max(1, o.reach || 16);
+      const scale = o.scale || 1, slope = o.slope || 0.27;
+      jetFwd.copy(dir).normalize();
+      jetIdle = 0;
+      jetT += dt;
+      const shade = m(origin, null);
+      jetAcc[0] += dt * 95;
+      jetAcc[1] += dt * 45;
+      jetAcc[2] += dt * 70;
+      jetAcc[3] += dt * 22;
+      // (1) fire lobes
+      while (jetAcc[0] >= 1) {
+        jetAcc[0] -= 1;
+        const core = ht() < 0.35;
+        ro(jetFwd, slope * (core ? 0.7 : 1.5), jetV);
+        const sp = reach * (core ? Ze(1.9, 2.8) : Ze(1.2, 2.2)), t = ht() * dt;
+        jetLobe(origin.x + jetV.x * sp * t, origin.y + jetV.y * sp * t, origin.z + jetV.z * sp * t,
+          jetV.x * sp, jetV.y * sp, jetV.z * sp,
+          core ? Ze(0.3, 0.5) : Ze(0.55, 0.95), (core ? 0.9 : 1.2) * scale, (core ? 2.2 : 3.8) * scale,
+          core, core ? 0.8 : 1.8, shade);
+      }
+      // (2) additive glow
+      while (jetAcc[1] >= 1) {
+        jetAcc[1] -= 1;
+        ro(jetFwd, slope, jetV);
+        const sp = reach * Ze(1.2, 2.1);
+        const id = c.emit(origin.x, origin.y, origin.z, jetV.x * sp, jetV.y * sp, jetV.z * sp,
+          Ze(0.25, 0.45), 1.4 * scale, 4.2 * scale);
+        if (id >= 0) {
+          c.frame[id] = V1; c.ramp[id] = 2;
+          c.r[id] = 2.6; c.g[id] = 1.15; c.b[id] = 0.3;
+          c.drag[id] = 1.6; c.rot[id] = ht() * 6.283; c.rotv[id] = (ht() - 0.5) * 3;
+          c.fin[id] = 0.1; c.fout[id] = 0.45; c.wind[id] = 1; c.turb[id] = 1.5;
+        }
+      }
+      // (3) embers
+      while (jetAcc[2] >= 1) {
+        jetAcc[2] -= 1;
+        ro(jetFwd, slope * 2.2, jetV);
+        const sp = reach * Ze(0.9, 2.2);
+        const id = c.emit(origin.x + jetFwd.x * 1.5, origin.y + jetFwd.y * 1.5, origin.z + jetFwd.z * 1.5,
+          jetV.x * sp, jetV.y * sp, jetV.z * sp, Ze(1.1, 2.4), 0.09 * scale, 0.03 * scale);
+        if (id >= 0) {
+          c.frame[id] = oo; c.ramp[id] = 3;
+          c.r[id] = 10; c.g[id] = 4.2; c.b[id] = 1;
+          c.drag[id] = 0.8; c.grav[id] = -0.6; c.turb[id] = 4; c.wind[id] = 1; c.fout[id] = 0.5;
+        }
+      }
+      // (4) smoke from the tail of the jet
+      while (jetAcc[3] >= 1) {
+        jetAcc[3] -= 1;
+        const d = reach * Ze(0.55, 1), g = Ze(0.04, 0.09);
+        ro(jetFwd, slope * 1.2, jetV);
+        const id = _(origin.x + jetFwd.x * d, origin.y + jetFwd.y * d, origin.z + jetFwd.z * d,
+          jetFwd.x * 4 + (ht() - 0.5), jetFwd.y * 4 + Ze(0.5, 1.5), jetFwd.z * 4 + (ht() - 0.5),
+          Ze(1.6, 2.6), 1.2 * scale, Ze(3.6, 5.2) * scale, g, g * 0.95, g * 0.9, 0.55, shade, 1.1, 0.9, 1, -1);
+        if (id >= 0) { l.fin[id] = 0.2; l.turb[id] = 1; }
+      }
+      // (5) mouth flare
+      w(origin.x + jetFwd.x * 0.4, origin.y + jetFwd.y * 0.4, origin.z + jetFwd.z * 0.4,
+        0.07, 2.2 * scale, 3.4 * scale, 7, 4.2, 1.6, oo);
+      // (6) dynamic light following the jet
+      if (!jetLight) {
+        const pool = y();
+        jetLight = pool && pool.acquire ? pool.acquire() : null;
+      }
+      if (jetLight) {
+        const L = jetLight.light, f = 0.85 + 0.15 * Math.sin(jetT * 61 + 1.3);
+        L.color.setRGB(1, 0.42 + 0.1 * Math.sin(jetT * 47), 0.12);
+        L.position.set(origin.x + jetFwd.x * reach * 0.4, origin.y + jetFwd.y * reach * 0.4, origin.z + jetFwd.z * reach * 0.4);
+        L.distance = 30;
+        L.intensity = 160 * f;
+      }
+      // (7) impact
+      if (o.hit) {
+        jetHit.copy(o.hit);
+        if (o.normal && o.normal.isVector3) jetN.copy(o.normal); else jetN.set(0, 1, 0);
+        jetAcc[4] += dt * 40;
+        while (jetAcc[4] >= 1) {
+          jetAcc[4] -= 1;
+          ro(jetN, 1.1, jetV);
+          const sp = Ze(2, 7);
+          jetLobe(jetHit.x + jetN.x * 0.3, jetHit.y + jetN.y * 0.3, jetHit.z + jetN.z * 0.3,
+            jetV.x * sp, jetV.y * sp + 1, jetV.z * sp, Ze(0.5, 0.9), 1.1 * scale, 3.2 * scale, ht() < 0.3, 2.2, shade);
+        }
+        if ((jetScorch -= dt) <= 0) { jetScorch = 0.25; p.add(jetHit, jetN, "scorch", 3.2); }
+        if ((jetGround -= dt) <= 0) { jetGround = 0.8; X(jetHit.x, jetHit.y, jetHit.z, "fire", 1.6, 2.2, shade); }
+      }
+    }
     function ue(ee) {
       (ee > 0 || (ee = 0), (v += ee), re(ee));
+      jetIdle += ee;
+      if (jetLight && jetIdle > 0.12) { jetLight.release(); jetLight = null; jetAcc.fill(0); }
       let B = i.camera ? i.camera.position : Es.set(0, 0, 0);
       (r.begin(),
         l.update(ee, r, B, t, v),
@@ -3440,9 +3560,11 @@ void main() {
     function me() {
       (l.clear(), c.clear(), u.clear(), h.clear(), f.clear(), p.clear());
       for (let ee of ie) ee.active && ee.stop();
+      jetLight && (jetLight.release(), (jetLight = null));
       (r.begin(), r.end(), a.begin(), a.end());
     }
     return {
+      flameJet,
       update: ue,
       clear: me,
       muzzleFlash: j,
@@ -4779,6 +4901,34 @@ void main() {
       Wo(n, 1.5)
     );
   }
+  const gigaAudioSamples = /*@inline:data/giga-audio.json*/ null;
+
+  function gigaSample(name) {
+    return (rate, random, variant) => Float32Array.from(
+      new Int16Array(assetBytes(gigaAudioSamples[name][variant])), value => value / 32768);
+  }
+
+  function gigaFireNoise(rate, random) {
+    const sound = Qn(rate, 4, random);
+    const hiss = Qn(rate, 4, random);
+    tn(sound, "lp", 620, .707, rate);
+    tn(hiss, "hp", 280, .707, rate);
+    tn(hiss, "lp", 3200, .707, rate);
+    for (let index = 0; index < sound.length; index++) {
+      const time = index / rate;
+      sound[index] = (sound[index] + .36 * hiss[index]) *
+        (.86 + .09 * Math.sin(31 * time) + .05 * Math.sin(73 * time));
+    }
+    return sound;
+  }
+
+  function gigaFireIgnition(rate, random) {
+    const sound = St(rate, .4);
+    Se(sound, ei(rate, .3, 106, 38, .015, .07, .008), 0, .72, rate);
+    Se(sound, at(rate, random, .4, .09, { lp: 2400, hp: 75, att: .02 }), 0, 1, rate);
+    return sound;
+  }
+
   function A8(i, e) {
     let t = St(i, 1.5),
       n = [0, 0, 0, 0];
@@ -5972,6 +6122,12 @@ void main() {
         ref: 8,
         roll: 0.5,
       },
+      giga_step: { gen: gigaSample("giga_step"), n: 4, sr: 24000, peak: .83, bus: "world", max: 3, pri: 5, ref: 9, boot: true },
+      giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
+      giga_death: { gen: gigaSample("giga_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
+      giga_foley: { gen: gigaSample("giga_foley"), n: 1, sr: 24000, peak: .65, bus: "world", loop: true, ref: 6, boot: true },
+      giga_fire: { gen: gigaFireNoise, n: 1, sr: 24000, peak: .72, bus: "world", loop: true, ref: 10, boot: true },
+      giga_ignite: { gen: gigaFireIgnition, n: 1, sr: 24000, peak: .8, bus: "world", max: 1, pri: 8, ref: 10, boot: true },
       hound_step: {
         gen: T8,
         n: 3,
@@ -6896,6 +7052,7 @@ void main() {
         xe ||
         pn.has(te) ||
         te.alive === !1 ||
+        te.type === "giganotosaurus" ||
         pn.set(te, {
           h: null,
           type: te.type === "hound" ? "hound" : "gull",
@@ -7186,6 +7343,14 @@ void main() {
             ze("impact_metal", { pos: Hn(te.pos), gain: 0.8, pitch: 0.55 }));
           return;
         }
+        if (te.ankylosaurus) {
+          const scale = te.enemy.size;
+          ze("hound_step", { pos: Hn(te.pos), gain: scale > 1 ? 1.05 : .65,
+            pitch: scale > 1 ? .66 : .96, ref: scale > 1 ? 10 : 5 });
+          ze("impact_metal", { pos: Hn(te.pos), gain: scale > 1 ? .32 : .15,
+            pitch: scale > 1 ? .67 : 1 });
+          return;
+        }
         te.type !== "gull" &&
           ze("hound_step", {
             pos: Hn(te.pos),
@@ -7216,6 +7381,7 @@ void main() {
         let he = te.enemy,
           pe = te.type || (he && he.type),
           ge = Hn(te.pos) || (he && Hn(he.pos));
+        if (pe === "giganotosaurus") return;
         (he && Rs(he),
           ze(pe === "hound" ? "hound_die" : "gull_die", {
             pos: ge,
@@ -7246,6 +7412,55 @@ void main() {
       ln("objective:all", () =>
         ze("objective_all", { delay: 2.2, gain: 1, jitter: 0 }),
       ));
+    let gigaFireLoop = null, gigaFoleyLoop = null;
+    function stopGigaRoar() {
+      for (const voice of X.world) {
+        if (voice.name !== "giga_roar" || voice.end <= e.currentTime) continue;
+        const now = e.currentTime;
+        voice.g.gain.cancelScheduledValues(now);
+        voice.g.gain.setTargetAtTime(0, now, .025);
+        voice.src.stop(now + .09);
+        voice.end = now + .09;
+      }
+    }
+    ln("giga:roar", ({ pos }) => ze("giga_roar", { pos, gain: 1, jitter: 0 }));
+    ln("giga:death", ({ pos }) => {
+      stopGigaRoar();
+      ze("giga_death", { pos, gain: 1, jitter: 0 });
+    });
+    ln("giga:step", ({ pos }) => ze("giga_step", {
+      pos, variant: Math.floor(s() * 4), gain: .87, jitter: .04,
+    }));
+    ln("giga:motion", ({ moving, pos }) => {
+      if (moving) {
+        gigaFoleyLoop ||= Be("giga_foley", { pos, gain: .24 });
+        gigaFoleyLoop.setPos(pos);
+        gigaFoleyLoop.setGain(.24);
+      } else gigaFoleyLoop?.setGain(0);
+    });
+    ln("giga:breath", ({ active, pos }) => {
+      if (active) {
+        if (!gigaFireLoop) {
+          ze("giga_ignite", { pos, gain: 1, jitter: 0 });
+          gigaFireLoop = Be("giga_fire", { pos, gain: .95, fade: 22, offset: 0 });
+        }
+        gigaFireLoop.setPos(pos);
+      } else {
+        gigaFireLoop?.stop(.1);
+        gigaFireLoop = null;
+      }
+    });
+    ln("giga:reset", () => {
+      stopGigaRoar();
+      gigaFireLoop?.stop(.08);
+      gigaFoleyLoop?.stop(.08);
+      gigaFireLoop = gigaFoleyLoop = null;
+      for (const voice of X.world) {
+        if (voice.name !== "giga_death" || voice.end <= e.currentTime) continue;
+        voice.src.stop();
+        voice.end = e.currentTime;
+      }
+    });
     let Zo = () => {
       let te = e.currentTime;
       te - _e > 6 && ((_e = te), ze("complete", { gain: 1, jitter: 0 }));

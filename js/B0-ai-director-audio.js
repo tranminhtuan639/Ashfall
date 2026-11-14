@@ -2427,14 +2427,7 @@
             (K.p.y += Math.sin(Math.PI * j) * m.lift));
         }
         if (m.swT >= 1) {
-          let Q = b[wm[m.sw][0]];
-          (s.events.emit("enemy:step", {
-            pos: Q.p,
-            type: "hound",
-            enemy: m,
-            speed: m.speed,
-          }),
-            (m.sY.v -= 0.12 + m.speed * 0.03),
+          ((m.sY.v -= 0.12 + m.speed * 0.03),
             (m.lastPair = m.sw),
             (m.sw = -1));
         }
@@ -2504,7 +2497,9 @@
           (u[L].rotation.x = bm.hip),
           (h[L].rotation.x = bm.knee));
       }
-      visual.update(T, m.speed, m.tyaw, m.tpitch, !m.alive, ee);
+      visual.update(T, m.speed, m.tyaw, m.tpitch, !m.alive, ee, pos => {
+        s.events.emit("enemy:step", { pos, type: "hound", enemy: m, ankylosaurus: true });
+      });
       visual.head.getWorldPosition(m.headPos);
     }
     function q(T) {
@@ -3063,7 +3058,8 @@
               N._raycast(T, D, C, G));
           }
           const raptorHit = i.defense?.raycast(T, D, Math.min(C, G?.dist ?? C));
-          return raptorHit || (G && G.enemy ? G : null);
+          const gigaHit = i.giga?.raycast(T, D, raptorHit?.dist ?? Math.min(C, G?.dist ?? C));
+          return gigaHit || raptorHit || (G && G.enemy ? G : null);
         },
         aliveCount() {
           let T = 0;
@@ -4296,6 +4292,7 @@
         i.events.emit("game:state", { state: P, prev: V }));
     }
     let boss = null;
+    let bossMaxHp = 0;
     let split = null;
     const offspring = new Set();
 
@@ -4313,7 +4310,10 @@
       const side = s.enemySpawns.find(point => point.type === "ground")?.pos;
       const spawn = side ? side.clone().multiplyScalar(.72) : new W(12, 0, 0);
       boss = spawnAnkylo(spawn, { hpScale: 10 });
-      if (boss) o.setObjective("Hạ Ankylosaurus lớn");
+      if (boss) {
+        bossMaxHp = boss.maxHp;
+        o.setObjective("Hạ Ankylosaurus lớn");
+      }
     }
 
     function splitPosition(origin, yaw, side, occupied) {
@@ -4337,7 +4337,7 @@
         const side = split.spawned === 0 ? -1 : 1;
         const point = splitPosition(split.origin, split.yaw, side, split.positions);
         if (!point) { split.at = c.time + .25; return; }
-        const child = spawnAnkylo(point, { size: 1, damageScale: .2 });
+        const child = spawnAnkylo(point, { size: 1, damageScale: .5, hpScale: 5 });
         if (!child) { split.at = c.time + .25; return; }
         split.positions.push(point);
         split.spawned++;
@@ -4354,7 +4354,10 @@
         split = { at: c.time + .55, origin: enemy.pos.clone(), yaw: enemy.yaw, spawned: 0, positions: [] };
         o.setObjective("Hai Ankylosaurus nhỏ sắp xuất hiện");
       } else if (offspring.delete(enemy)) {
-        if (!split && !offspring.size) ee();
+        if (!split && !offspring.size) {
+          const spawn = s.enemySpawns.filter(point => point.type === "ground").at(-1)?.pos;
+          i.giga.start(spawn ? spawn.clone().multiplyScalar(.7) : new W(28, 0, 0), 3300);
+        }
         else if (!split) o.setObjective("Hạ Ankylosaurus nhỏ · Còn " + offspring.size);
       }
     });
@@ -4465,6 +4468,7 @@
         q(),
         o.setRelays && o.setRelays(0, c.relays.length));
       i.defense.reset();
+      i.giga.reset();
       boss = null;
       split = null;
       offspring.clear();
@@ -4916,6 +4920,13 @@
             if (defense.done && !boss) spawnBoss();
           }
           if (split && c.time >= split.at) spawnOffspring();
+          if (i.giga.started) {
+            i.giga.update(P);
+            if (_.state !== "playing") return false;
+            if (i.giga.done) return (ee(), false);
+            o.setObjective("Hạ Giganotosaurus · " + Math.ceil(i.giga.health) + "/" + i.giga.maxHealth +
+              (i.giga.burning ? " · Đang phun lửa!" : i.giga.windingUp ? " · Sắp phun lửa!" : ""));
+          }
           (X(P),
             (c.alertT = Math.max(0, c.alertT - P)),
             (c.waveHot = Math.max(0, c.waveHot - P)));

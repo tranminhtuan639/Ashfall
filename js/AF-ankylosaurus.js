@@ -1,6 +1,6 @@
   const ankylosaurusData = /*@inline:data/ankylosaurus.json*/ null;
 
-  const ANKYLOSAURUS_SIZE = 6;
+  const ANKYLOSAURUS_SIZE = 5;
 
   async function loadAnkylosaurus() {
     async function loadPart(data, skinned) {
@@ -95,6 +95,12 @@
         }))),
       ]));
       const point = new W();
+      const footfalls = [
+        [.17, nodes.find(node => node.name === "Back_Leg_Foot_R")],
+        [.37, nodes.find(node => node.name === "Front_Leg_Foot_L")],
+        [.76, nodes.find(node => node.name === "Back_Leg_Foot_L")],
+        [.93, nodes.find(node => node.name === "Front_Leg_Foot_R")],
+      ];
       let activeAction;
       return {
         mount, head, muzzle, turret,
@@ -106,7 +112,7 @@
           mount.rotation.set(0, 0, 0);
           mount.position.y = 0;
         },
-        update(dt, speed, yaw, pitch, fallen, roll) {
+        update(dt, speed, yaw, pitch, fallen, roll, onStep) {
           const next = actions.get(speed > .35 && !fallen ? "walk" : "idle");
           if (next !== activeAction) {
             activeAction?.fadeOut(.15);
@@ -114,6 +120,7 @@
             activeAction = next;
           }
           next.setEffectiveTimeScale(next === actions.get("walk") ? lt.MathUtils.clamp(speed / (2 * size), .45 / size, 2.2) : 1);
+          const previousTime = next.time;
           if (!fallen) mixer.update(dt);
           mount.rotation.z = roll;
           mount.position.y = fallen ? .06 : 0;
@@ -121,6 +128,14 @@
           turret.position.copy(mount.worldToLocal(saddle.getWorldPosition(point)));
           turret.rotation.set(pitch * .65, yaw, 0, "YXZ");
           turret.updateMatrixWorld(true);
+          if (!fallen && next === actions.get("walk")) {
+            const now = next.time;
+            for (const [at, foot] of footfalls) {
+              if (now >= previousTime ? at > previousTime && at <= now : at > previousTime || at <= now) {
+                onStep(foot.getWorldPosition(point));
+              }
+            }
+          }
         },
       };
     };
