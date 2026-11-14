@@ -3059,7 +3059,11 @@
           }
           const raptorHit = i.defense?.raycast(T, D, Math.min(C, G?.dist ?? C));
           const gigaHit = i.giga?.raycast(T, D, raptorHit?.dist ?? Math.min(C, G?.dist ?? C));
-          return gigaHit || raptorHit || (G && G.enemy ? G : null);
+          let closest = gigaHit || raptorHit || (G && G.enemy ? G : null);
+          for (const bossEnemy of [i.spino, ...(i.gigaReinforcements || [])]) {
+            closest = bossEnemy?.raycast(T, D, closest?.dist ?? C) || closest;
+          }
+          return closest;
         },
         aliveCount() {
           let T = 0;
@@ -4472,6 +4476,8 @@
         o.setRelays && o.setRelays(0, c.relays.length));
       i.defense.reset();
       i.giga.reset();
+      i.spino.reset();
+      for (const ally of i.gigaReinforcements) ally.reset();
       boss = null;
       split = null;
       offspring.clear();
@@ -4924,11 +4930,32 @@
             if (defense.done && !boss) spawnBoss();
           }
           if (split && c.time >= split.at) spawnOffspring();
-          if (i.giga.started) {
+          if (i.spino.started) {
+            i.spino.update(P);
+            for (const ally of i.gigaReinforcements) {
+              if (_.state !== "playing") return false;
+              if (ally.started && !ally.done) ally.update(P);
+            }
+            if (_.state !== "playing") return false;
+            if (i.spino.done && i.gigaReinforcements.every(ally => ally.done)) return (ee(), false);
+            const remaining = i.gigaReinforcements.filter(ally => ally.started && ally.health > 0).length;
+            o.setObjective("Spinosaurus · " + Math.ceil(i.spino.health) + "/6000" + i.spino.status +
+              (remaining ? " · Giga tím còn " + remaining : ""));
+          } else if (i.giga.started) {
             i.giga.update(P);
             if (_.state !== "playing") return false;
             if (i.giga.done) {
-              if (i.giga.purple) return (ee(), false);
+              if (i.giga.purple) {
+                const east = new W(s.arena.A - 11, 0, 0);
+                i.spino.start(east, position => {
+                  i.gigaReinforcements.forEach((ally, index) => {
+                    const spawn = position.clone().add(new W(-6, 0, index === 0 ? -10 : 10));
+                    ally.start(spawn, 2000, { purpleBoss: true });
+                  });
+                });
+                o.message("Spinosaurus xuất hiện ở phía Đông", 4);
+                return true;
+              }
               const side = n.pos.x >= 0 ? -1 : 1;
               const spawn = new W(side * Math.min(28, s.arena.A * .6), 0, 0);
               i.giga.start(spawn, i.giga.maxHealth, { purpleBoss: true });

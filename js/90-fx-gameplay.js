@@ -4913,6 +4913,13 @@ void main() {
       new Int16Array(assetBytes(gigaAudioSamples[name][variant])), value => value / 32768);
   }
 
+  const spinoAudioSamples = /*@inline:data/spino-audio.json*/ null;
+
+  function spinoSample(name) {
+    return (rate, random, variant) => Float32Array.from(
+      new Int16Array(assetBytes(spinoAudioSamples[name][variant])), value => value / 32768);
+  }
+
   function gigaFireNoise(rate, random) {
     const sound = Qn(rate, 4, random);
     const hiss = Qn(rate, 4, random);
@@ -6127,6 +6134,12 @@ void main() {
         ref: 8,
         roll: 0.5,
       },
+      spino_roar: { gen: spinoSample("spino_roar"), n: 2, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 18, boot: true },
+      spino_death: { gen: spinoSample("spino_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 18, boot: true },
+      spino_charge: { gen: spinoSample("spino_charge"), n: 1, sr: 24000, peak: .85, bus: "world", max: 1, pri: 9, ref: 16, boot: true },
+      spino_beam_start: { gen: spinoSample("spino_beam_start"), n: 1, sr: 24000, peak: .94, bus: "world", max: 1, pri: 9, ref: 18, boot: true },
+      spino_beam_loop: { gen: spinoSample("spino_beam_loop"), n: 1, sr: 24000, peak: .87, bus: "world", loop: true, ref: 18, boot: true },
+      spino_beam_tail: { gen: spinoSample("spino_beam_tail"), n: 1, sr: 24000, peak: .83, bus: "world", max: 1, pri: 8, ref: 16, boot: true },
       giga_step: { gen: gigaSample("giga_step"), n: 4, sr: 24000, peak: .83, bus: "world", max: 3, pri: 5, ref: 9, boot: true },
       giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
       giga_death: { gen: gigaSample("giga_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
@@ -7057,7 +7070,7 @@ void main() {
         xe ||
         pn.has(te) ||
         te.alive === !1 ||
-        te.type === "giganotosaurus" ||
+        (te.type === "giganotosaurus" || te.type === "spinosaurus") ||
         pn.set(te, {
           h: null,
           type: te.type === "hound" ? "hound" : "gull",
@@ -7386,7 +7399,7 @@ void main() {
         let he = te.enemy,
           pe = te.type || (he && he.type),
           ge = Hn(te.pos) || (he && Hn(he.pos));
-        if (pe === "giganotosaurus") return;
+        if (pe === "giganotosaurus" || pe === "spinosaurus") return;
         (he && Rs(he),
           ze(pe === "hound" ? "hound_die" : "gull_die", {
             pos: ge,
@@ -7428,7 +7441,7 @@ void main() {
         voice.end = now + .09;
       }
     }
-    ln("giga:roar", ({ pos }) => ze("giga_roar", { pos, gain: 1, jitter: 0 }));
+    ln("giga:roar", ({ pos }) => ze("giga_roar", { pos, gain: 1.7, ref: 23, jitter: 0 }));
     ln("giga:death", ({ pos }) => {
       stopGigaRoar();
       ze("giga_death", { pos, gain: 1, jitter: 0 });
@@ -7464,6 +7477,43 @@ void main() {
         if (voice.name !== "giga_death" || voice.end <= e.currentTime) continue;
         voice.src.stop();
         voice.end = e.currentTime;
+      }
+    });
+    let spinoBeamLoop = null;
+    function stopSpinoBeam() {
+      spinoBeamLoop?.stop(.08);
+      spinoBeamLoop = null;
+    }
+    const spinoCues = {
+      roar: { name: "spino_roar", gain: 1.85, ref: 28 },
+      death: { name: "spino_death", gain: 1.25 },
+      charge: { name: "spino_charge", gain: 1.35 },
+      ignite: { name: "spino_beam_start", gain: 1.95, ref: 28 },
+      tail: { name: "spino_beam_tail", gain: 1.3 },
+    };
+    ln("spino:audio", ({ cue, pos, variant }) => {
+      if (cue === "stop") {
+        stopSpinoBeam();
+        const now = e.currentTime;
+        for (const voice of X.world) {
+          if (!voice.name?.startsWith("spino_") || voice.end <= now) continue;
+          voice.g.gain.cancelScheduledValues(now);
+          voice.g.gain.setTargetAtTime(0, now, .02);
+          voice.src.stop(now + .075);
+          voice.end = now + .075;
+        }
+        return;
+      }
+      if (cue === "beam") {
+        spinoBeamLoop ||= Be("spino_beam_loop", { pos, gain: 1.55, ref: 27, fade: 24, offset: 0 });
+        spinoBeamLoop.setPos(pos);
+        return;
+      }
+      if (cue === "tail") stopSpinoBeam();
+      if (cue === "step") ze("giga_step", { pos, variant: Math.floor(s() * 4), pitch: .82, gain: .92, ref: 11 });
+      else if (spinoCues[cue]) {
+        const { name, gain, ref } = spinoCues[cue];
+        ze(name, { pos, variant, gain, ref, jitter: 0 });
       }
     });
     let Zo = () => {

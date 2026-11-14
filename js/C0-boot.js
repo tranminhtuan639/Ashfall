@@ -144,7 +144,20 @@
         (await Nr("Dựng khán đài", 0.34),
         await r("level", "level", () => buildColosseum(t), !0),
         await r("defense", "defense", () => setupRaptorDefense(t), !0),
-        await r("giga", "giga", () => setupGiganotosaurus(t), !0),
+        await r("giga", "giga", async () => {
+          const assets = Promise.all([
+            loadDefenseMesh(giganotosaurusData, true),
+            akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
+          ]);
+          const options = { assets, reinforcement: true };
+          const [giga, left, right, spino] = await Promise.all([
+            setupGiganotosaurus(t, { assets }), setupGiganotosaurus(t, options),
+            setupGiganotosaurus(t, options), setupSpinosaurus(t),
+          ]);
+          t.spino = spino;
+          t.gigaReinforcements = [left, right];
+          return giga;
+        }, !0),
         await Nr("Chuẩn bị sân", 0.5),
         await r("backdrop", "backdrop", () => dr.backdrop()),
         await Nr("Tạo nền ướt", 0.58),

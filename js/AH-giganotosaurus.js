@@ -4,14 +4,19 @@
 
   const gigaBiteClip = /*@inline:data/giga-bite.json*/ null;
 
-  async function setupGiganotosaurus(game) {
-    const [mesh, purpleMap] = await Promise.all([
+  async function setupGiganotosaurus(game, { reinforcement = false, assets } = {}) {
+    const [template, purpleMap] = await (assets || Promise.all([
       loadDefenseMesh(giganotosaurusData, true),
       akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
-    ]);
+    ]));
+    const mesh = template.clone();
+    mesh.material = template.material.clone();
     const originalMap = mesh.material.map;
     const normalSize = 13;
     let purple = false;
+    const emitAudio = (event, data) => {
+      if (!reinforcement) game.events.emit(event, data);
+    };
     const { rig, mixer, actions } = bindDefenseRig({ ...giganotosaurusData, clips: [...giganotosaurusData.clips, gigaBiteClip] }, mesh);
     const model = new lt.Group();
     model.name = "giganotosaurus";
@@ -31,7 +36,7 @@
     flame.frustumCulled = false;
     game.events.on("player:dead", () => {
       flame.visible = false;
-      game.events.emit("giga:reset");
+      emitAudio("giga:reset");
     });
     flame.instanceMatrix.setUsage(lt.DynamicDrawUsage);
     game.scene.add(flame);
@@ -79,9 +84,9 @@
         flame.visible = false;
         state = "dying";
         play("Death");
-        game.events.emit("giga:breath", { active: false });
-        game.events.emit("giga:motion", { moving: false });
-        game.events.emit("giga:death", { pos: mouth.getWorldPosition(origin) });
+        emitAudio("giga:breath", { active: false });
+        emitAudio("giga:motion", { moving: false });
+        emitAudio("giga:death", { pos: mouth.getWorldPosition(origin) });
         game.events.emit("enemy:killed", { enemy: this, pos: this.pos, type: this.type });
         return true;
       },
@@ -110,7 +115,7 @@
 
     function breathe(dt) {
       mouth.getWorldPosition(origin);
-      game.events.emit("giga:breath", { active: true, pos: origin });
+      emitAudio("giga:breath", { active: true, pos: origin });
       forward.copy(facing).normalize();
       // Follow the animated mouth while keeping the shot aimed at the spot
       // telegraphed when Roar began.
@@ -165,7 +170,7 @@
     function bite() {
       const player = game.player;
       mouth.getWorldPosition(origin);
-      const scale = purple ? 2 : 1;
+      const scale = purple && !reinforcement ? 2 : 1;
       target.copy(player.pos);
       target.y += .9;
       point.subVectors(target, origin);
@@ -182,7 +187,7 @@
       mixer.stopAllAction();
       state = "ready";
       purple = false;
-      game.events.emit("giga:reset");
+      emitAudio("giga:reset");
     }
     reset();
 
@@ -198,7 +203,7 @@
       get maxHealth() { return enemy.maxHp; },
       start(position, health, { purpleBoss = false } = {}) {
         purple = purpleBoss;
-        model.scale.setScalar(normalSize * (purple ? 2 : 1));
+        model.scale.setScalar(normalSize * (purple && !reinforcement ? 2 : 1));
         mesh.material.map = purple ? purpleMap : originalMap;
         flame.visible = false;
         model.position.copy(position);
@@ -217,7 +222,7 @@
         ray.set(start, direction);
         let closest = null;
         for (const { bone, radius, sphere } of spheres) {
-          sphere.radius = radius * (purple ? 2 : 1);
+          sphere.radius = radius * (purple && !reinforcement ? 2 : 1);
           bone.getWorldPosition(sphere.center);
           if (!ray.intersectSphere(sphere, hit)) continue;
           const dist = start.distanceTo(hit);
@@ -248,7 +253,7 @@
         if (state === "roar") {
           flame.visible = false;
           if (action.time >= flameStart && action.time < flameEnd) breathe(dt);
-          else game.events.emit("giga:breath", { active: false });
+          else emitAudio("giga:breath", { active: false });
           if (action.time >= action.getClip().duration - .001) {
             state = "walk";
             cooldown = 2;
@@ -265,7 +270,7 @@
         target.y += .9;
         delta.subVectors(target, model.position);
         delta.y = 0;
-        const biteRange = purple ? 11 : 5.5;
+        const biteRange = purple && !reinforcement ? 11 : 5.5;
         const close = delta.lengthSq() <= biteRange ** 2;
         if (cooldown <= 0 && delta.lengthSq() <= detectRange ** 2) {
           face(delta, dt);
@@ -277,15 +282,15 @@
             if (close) {
               state = "bite";
               play("Bite");
-              game.events.emit("giga:motion", { moving: false });
+              emitAudio("giga:motion", { moving: false });
               return;
             }
             aim.copy(target);
             facing.copy(forward);
             state = "roar";
             play("Roar");
-            game.events.emit("giga:motion", { moving: false });
-            game.events.emit("giga:roar", { pos: mouth.getWorldPosition(origin) });
+            emitAudio("giga:motion", { moving: false });
+            emitAudio("giga:roar", { pos: mouth.getWorldPosition(origin) });
             return;
           }
         }
@@ -310,13 +315,13 @@
             }
           }
         }
-        game.events.emit("giga:motion", { moving, pos: model.position });
+        emitAudio("giga:motion", { moving, pos: model.position });
         if (!moving) return;
         mixer.update(dt);
         const now = action.time;
         for (const [at, bone] of footfalls) {
           if (now >= previousTime ? at > previousTime && at <= now : at > previousTime || at <= now) {
-            game.events.emit("giga:step", { pos: bone.getWorldPosition(footPosition) });
+            emitAudio("giga:step", { pos: bone.getWorldPosition(footPosition) });
           }
         }
       },
