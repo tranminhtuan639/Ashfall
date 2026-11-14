@@ -1045,7 +1045,8 @@ void main(){
   } else {
     p = aSeed.xyz * uBox + vel * uTime;
     p = mod(p - cameraPosition + 0.5 * uBox, uBox) - 0.5 * uBox + cameraPosition;
-    len = 0.03 * length(vel);
+    p += vec3(sin(uTime * 0.9 + aSeed.x * 40.0), 0.3 * sin(uTime * 0.7 + aSeed.y * 30.0), cos(uTime * 0.8 + aSeed.z * 35.0)) * 0.6;   // ash flutters on the wind
+    len = max(0.06, 0.02 * length(vel));
     if (fract(aSeed.w * 7.13 + aSeed.x) > uRain) kill = 1.0;
     if (wInside(p) && !wSky(p)) kill = 1.0;
   }
@@ -1053,21 +1054,22 @@ void main(){
   vec3 dir = normalize(vel);
   vec3 toP = p - cameraPosition; float dist = length(toP);
   vec3 side = normalize(cross(dir, toP));
-  float w0 = 0.005 + 0.004 * fract(aSeed.w * 3.7);
+  float w0 = 0.02 + 0.035 * fract(aSeed.w * 3.7);
   float w = max(w0, dist * uPix * 0.75);
   vec3 wp = p + dir * (len * (position.y - 0.5)) + side * (w * position.x);
   float a = (w0 / w) * smoothstep(0.7, 2.6, dist) * (1.0 - smoothstep(0.38, 0.5, dist / uBox.x));
   float c = dot(toP / max(dist, 1e-3), uSunDir);
-  vCol = uAmb + uSunCol * wPhase(c);
-  vA = a * (0.55 + 0.45 * fract(aSeed.w * 13.3));
+  float emb = step(0.955, fract(aSeed.w * 17.9 + aSeed.y * 3.1));          // ~4% of flakes are still-glowing embers
+  vec3 ash = vec3(0.20, 0.17, 0.16) + uAmb * 0.6 + uSunCol * wPhase(c) * 0.5;
+  vCol = mix(ash, vec3(2.4, 0.85, 0.22), emb);
+  vA = min(1.0, a * (0.55 + 0.45 * fract(aSeed.w * 13.3)) * (1.0 + emb));
   gl_Position = kill > 0.5 ? vec4(2.0, 2.0, 2.0, 1.0) : projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`,
     FR = `
 varying vec3 vCol; varying float vA; varying vec2 vUv;
 void main(){
-  float x = 1.0 - abs(vUv.x) * 2.0;
-  float e = smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.55, vUv.y);
-  gl_FragColor = vec4(vCol, vA * x * e);
+  float r = length(vec2(vUv.x * 2.0, (vUv.y - 0.5) * 2.0));
+  gl_FragColor = vec4(vCol, vA * smoothstep(1.0, 0.25, r));
 }`,
     UR = `
 uniform float uTime, uRain; uniform vec3 uSunDir, uSunCol, uAmb, uMaskRect; uniform sampler2D uMask;
@@ -1138,7 +1140,7 @@ void main(){
   function Nb(i, e) {
     let t = i.rng && i.rng.fork ? i.rng.fork() : Math.random,
       n = Math.max(0.15, i.quality.rain || 0.5),
-      s = Math.round(9e3 * n),
+      s = Math.round(14e3 * n),
       o = 260,
       r = Math.round(900 * n),
       a = [0, 1, 2, 3].map(() => new W()),
@@ -1160,7 +1162,7 @@ void main(){
         uSky: { value: f },
         uPix: { value: 0.002 },
         uDrip: { value: 0 },
-        uVel: { value: new W(-2.6, -9.4, 1.1) },
+        uVel: { value: new W(-1.4, -1.5, 0.7) },
         uBox: { value: new W(26, 15, 26) },
       },
       d = new zn({
@@ -1169,7 +1171,7 @@ void main(){
         fragmentShader: FR,
         transparent: !0,
         depthWrite: !1,
-        blending: hr,
+        blending: 1, // NormalBlending: ash is dark, rain was additive
         side: Sn,
         fog: !1,
       }),
@@ -1219,7 +1221,7 @@ void main(){
           (b += (m - b) * Math.min(1, w * 0.8)),
           (h.uTime.value = _),
           (h.uRain.value = b),
-          (v.visible = y.visible = b > 0.01));
+          (v.visible = b > 0.01, y.visible = !1));
         let S = i.camera;
         if (S) {
           let O = i.render && i.render.resolution;
@@ -1351,7 +1353,7 @@ void main(){
           ((A += M),
             x.update(M),
             (v.uniforms.uTime.value = A),
-            (v.uniforms.uRain.value = x.rainLevel),
+            (v.uniforms.uRain.value = 0),
             (g.uniforms.uTime.value = A));
         },
       };

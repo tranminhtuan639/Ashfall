@@ -1,6 +1,6 @@
   const ankylosaurusData = /*@inline:data/ankylosaurus.json*/ null;
 
-  const ANKYLOSAURUS_SIZE = 5;
+  const ANKYLOSAURUS_SIZE = 6;
 
   async function loadAnkylosaurus() {
     async function loadPart(data, skinned) {

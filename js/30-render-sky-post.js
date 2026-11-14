@@ -12,8 +12,8 @@ float skyToSun(vec3 d){ return clamp(dot(normalize(d.xz + vec2(1e-5)), normalize
 vec3 horizonColor(vec3 d){
   float ts = skyToSun(d);
   vec3 c = mix(uHorAway, uHorAway * 1.25 + vec3(0.05, 0.03, 0.02), smoothstep(0.2, 0.75, ts));
-  c = mix(c, uHor * vec3(1.9, 1.55, 1.2), pow(ts, 6.0));
-  c = mix(c, vec3(1.0, 0.60, 0.24) * 3.4, pow(ts, 34.0));
+  c = mix(c, uHor * vec3(1.9, 1.0, 0.65), pow(ts, 6.0));
+  c = mix(c, vec3(1.0, 0.30, 0.09) * 3.4, pow(ts, 34.0));
   return c;
 }
 `;
@@ -61,11 +61,11 @@ void main(){
 
   // ---- clear sky behind / below the deck ----
   vec3 hc = horizonColor(d);
-  vec3 midC = mix(vec3(0.15, 0.24, 0.36), vec3(0.72, 0.50, 0.34), pow(ts, 3.0));   // pale band above the fire
+  vec3 midC = mix(vec3(0.17, 0.06, 0.05), vec3(0.95, 0.34, 0.14), pow(ts, 3.0));   // pale band above the fire
   vec3 clearC = mix(hc, midC, smoothstep(0.0, 0.17, h));
-  clearC = mix(clearC, vec3(0.085, 0.145, 0.24), smoothstep(0.10, 0.5, h));
+  clearC = mix(clearC, vec3(0.075, 0.022, 0.022), smoothstep(0.10, 0.5, h));
   // aureole (mie glow round the sun)
-  clearC += uSunCol * vec3(1.0, 0.86, 0.68) * (pow(s, 8.0) * 0.14 + pow(s, 64.0) * 0.55 + pow(s, 600.0) * 2.2 + pow(s, 6000.0) * 14.0);
+  clearC += uSunCol * vec3(1.0, 0.62, 0.40) * (pow(s, 8.0) * 0.14 + pow(s, 64.0) * 0.55 + pow(s, 600.0) * 2.2 + pow(s, 6000.0) * 14.0);
 
   // ---- cloud deck ----
   vec2 cuv = d.xz / (h + 0.10) * vec2(0.62, 0.95);          // rolls of cloud run roughly east-west
@@ -96,9 +96,9 @@ void main(){
   float densS = fbm5(qq + sd * 0.22);
   float relief = clamp((dens - densS) * 4.5 + 0.5, 0.0, 1.0);
   float thick = smoothstep(0.40, 0.72, body);
-  vec3 cool = mix(vec3(0.155, 0.195, 0.255), vec3(0.030, 0.042, 0.064), thick);       // slate, darker where the deck is thick
+  vec3 cool = mix(vec3(0.20, 0.105, 0.09), vec3(0.036, 0.020, 0.018), thick);       // slate, darker where the deck is thick
   cool *= 0.55 + 0.9 * relief * relief;
-  cool += vec3(0.07, 0.10, 0.15) * pow(1.0 - thick, 3.0);                             // thin spots let cold light through
+  cool += vec3(0.16, 0.06, 0.04) * pow(1.0 - thick, 3.0);                             // thin spots let cold light through
   // warm light raking the underside from the gap: strongest near the sun and near the deck edge
   float nearSun = pow(ts, 5.0) * exp(-max(h - edge, 0.0) * 4.5) * 0.9 + pow(s, 7.0) * 0.9;
   vec3 warm = (uHor * vec3(1.30, 0.66, 0.40)) * nearSun * (0.05 + 2.2 * relief * relief * relief) * 1.15;
@@ -108,18 +108,18 @@ void main(){
   vec3 cloudC = cool + warm;
   // sheet lightning inside the deck
   float fl = uFlash * pow(max(dot(d, uFlashDir), 0.0), 5.0);
-  cloudC += vec3(0.55, 0.68, 1.0) * fl * (0.4 + 2.2 * dens * dens);
+  cloudC += vec3(0.95, 0.62, 0.85) * fl * (0.4 + 2.2 * dens * dens);
   // aerial perspective: far cloud melts into the horizon colour
   cloudC = mix(cloudC, hc * 0.55 + cloudC * 0.45, exp(-h * 11.0));
 
   vec3 col = mix(clearC, cloudC, cov * 0.985);
-  vec3 scudC = mix(vec3(0.10, 0.11, 0.14), uHor * 1.5, pow(ts, 3.0)) + uSunCol * pow(s, 24.0) * 2.0;
+  vec3 scudC = mix(vec3(0.13, 0.06, 0.05), uHor * 1.5, pow(ts, 3.0)) + uSunCol * pow(s, 24.0) * 2.0;
   col = mix(col, scudC, scud);
 
   // sun disk (not in the environment capture: the directional light is the sun there)
   float veil = (1.0 - cov * 0.92) * (1.0 - scud * 0.7);
   float disk = smoothstep(0.999905, 0.999955, mu);
-  col += vec3(1.0, 0.80, 0.52) * disk * 110.0 * veil * (1.0 - uEnv);
+  col += vec3(1.0, 0.50, 0.22) * disk * 110.0 * veil * (1.0 - uEnv);
 
   // below the horizon: sea haze / ground bounce (mostly hidden by geometry)
   if (d.y < 0.0) {
@@ -661,7 +661,7 @@ void main(){
   vec3 dirt = texture2D(tDirt, vUv).rgb;
   col = mix(col, bloom, uBloom);
   col += bloom * dirt * uDirt;
-  col += texture2D(tStreak, vUv).rgb * vec3(0.45, 0.62, 1.0) * uStreak;
+  col += texture2D(tStreak, vUv).rgb * vec3(0.95, 0.50, 0.25) * uStreak;
   // sun glare + flare (occlusion-tested)
   float vis = ad.g * uSunOn;
   if (vis > 0.002) { vec3 fl = flare(vUv, uSunUv, vis) * uFlare; col += fl * (1.0 + dirt * 1.5); }
@@ -674,12 +674,12 @@ void main(){
   // ---- grade (display-linear) ----
   float l = luma(col);
   // split tone: teal shadows, warm highlights
-  vec3 sh = vec3(0.80, 1.01, 1.13), hi = vec3(1.07, 1.0, 0.90);
+  vec3 sh = vec3(1.06, 0.93, 0.90), hi = vec3(1.10, 0.98, 0.84);
   col *= mix(sh, hi, smoothstep(0.03, 0.55, l));
   // gentle S-curve
   col = mix(col, col * col * (3.0 - 2.0 * col), 0.22);
   // lifted, slightly teal blacks
-  col = col * 0.988 + vec3(0.006, 0.0085, 0.011);
+  col = col * 0.988 + vec3(0.011, 0.005, 0.004);
   // saturation (gameplay driven)
   float sat = uSaturation * (1.0 - 0.65 * uLowHealth) * (1.0 - 0.5 * uDamage);
   l = luma(col);

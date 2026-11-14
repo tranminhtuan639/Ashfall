@@ -1,11 +1,21 @@
-const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
+  const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
+
+  const gigaPurpleColor = /*@inline:data/giga-purple-color.json*/ null;
+
+  const gigaBiteClip = /*@inline:data/giga-bite.json*/ null;
 
   async function setupGiganotosaurus(game) {
-    const mesh = await loadDefenseMesh(giganotosaurusData, true);
-    const { rig, mixer, actions } = bindDefenseRig(giganotosaurusData, mesh);
+    const [mesh, purpleMap] = await Promise.all([
+      loadDefenseMesh(giganotosaurusData, true),
+      akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
+    ]);
+    const originalMap = mesh.material.map;
+    const normalSize = 13;
+    let purple = false;
+    const { rig, mixer, actions } = bindDefenseRig({ ...giganotosaurusData, clips: [...giganotosaurusData.clips, gigaBiteClip] }, mesh);
     const model = new lt.Group();
     model.name = "giganotosaurus";
-    model.scale.setScalar(15);
+    model.scale.setScalar(normalSize);
     model.add(rig);
     const head = rig.getObjectByName("Head");
     const mouth = new lt.Object3D();
@@ -26,6 +36,7 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
     flame.instanceMatrix.setUsage(lt.DynamicDrawUsage);
     game.scene.add(flame);
 
+    const biteImpact = .5;
     const flameStart = 3.1, flameEnd = 6.1;
     // ---- Chỉnh tầm / phạm vi ở đây (gốc: detect 14, range 16, góc .27, scale 1, rộng .45) ----
     const detectRange = 32;          // tầm phát hiện: cách người chơi bao xa (m) thì nó dừng lại gầm + phun lửa
@@ -118,7 +129,7 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
         flame.count = 0;
         const blocked = shot && length < range - .2 && reach >= length - .01;
         jet(origin, forward, {
-          dt, reach, slope: coneSlope, scale: flameScale,
+          dt, reach, slope: coneSlope, scale: flameScale, purple,
           hit: blocked ? point.copy(origin).addScaledVector(forward, length) : null,
           normal: shot?.normal,
         });
@@ -131,7 +142,8 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
         const radius = (.13 + .49 * t) * (1 - .3 * t * t);
         matrix.makeScale(radius, radius, radius).setPosition(point);
         flame.setMatrixAt(index, matrix);
-        color.setRGB(1, .1 + .78 * (1 - t), .025 + .24 * (1 - t) ** 3);
+        if (purple) color.setRGB(.65 + .35 * (1 - t), .15 + .45 * (1 - t), 1);
+        else color.setRGB(1, .1 + .78 * (1 - t), .025 + .24 * (1 - t) ** 3);
         flame.setColorAt(index, color);
       });
       if (!jet) {
@@ -150,10 +162,26 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
           !cast(origin, delta.normalize(), distance)) player.damage(34 * dt, origin);
     }
 
+    function bite() {
+      const player = game.player;
+      mouth.getWorldPosition(origin);
+      const scale = purple ? 2 : 1;
+      target.copy(player.pos);
+      target.y += .9;
+      point.subVectors(target, origin);
+      const distance = point.length();
+      if (!player.alive || Math.hypot(point.x, point.z) > 2 * scale ||
+          Math.abs(point.y) > 3.1 * scale || distance < .001) return;
+      if (!cast(origin, point.multiplyScalar(1 / distance), distance)) {
+        player.damage(32, origin);
+      }
+    }
+
     function reset() {
       model.visible = flame.visible = enemy.alive = false;
       mixer.stopAllAction();
       state = "ready";
+      purple = false;
       game.events.emit("giga:reset");
     }
     reset();
@@ -161,12 +189,18 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
     return {
       reset,
       get started() { return state !== "ready"; },
+      get purple() { return purple; },
       get done() { return state === "done"; },
+      get biting() { return state === "bite"; },
       get burning() { return flame.visible; },
       get windingUp() { return state === "roar" && action.time < flameStart; },
       get health() { return enemy.hp; },
       get maxHealth() { return enemy.maxHp; },
-      start(position, health) {
+      start(position, health, { purpleBoss = false } = {}) {
+        purple = purpleBoss;
+        model.scale.setScalar(normalSize * (purple ? 2 : 1));
+        mesh.material.map = purple ? purpleMap : originalMap;
+        flame.visible = false;
         model.position.copy(position);
         model.rotation.y = Math.atan2(game.player.pos.x - position.x, game.player.pos.z - position.z);
         model.visible = enemy.alive = true;
@@ -182,7 +216,8 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
         if (!enemy.alive) return null;
         ray.set(start, direction);
         let closest = null;
-        for (const { bone, sphere } of spheres) {
+        for (const { bone, radius, sphere } of spheres) {
+          sphere.radius = radius * (purple ? 2 : 1);
           bone.getWorldPosition(sphere.center);
           if (!ray.intersectSphere(sphere, hit)) continue;
           const dist = start.distanceTo(hit);
@@ -198,6 +233,16 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
         if (state !== "walk") mixer.update(dt);
         if (state === "dying") {
           if (action.time >= action.getClip().duration - .001) state = "done";
+          return;
+        }
+        if (state === "bite") {
+          if (previousTime < biteImpact && action.time >= biteImpact) bite();
+          if (action.time >= action.getClip().duration - .001) {
+            state = "walk";
+            cooldown = 1.1;
+            repath = 0;
+            play("Walk");
+          }
           return;
         }
         if (state === "roar") {
@@ -220,6 +265,8 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
         target.y += .9;
         delta.subVectors(target, model.position);
         delta.y = 0;
+        const biteRange = purple ? 11 : 5.5;
+        const close = delta.lengthSq() <= biteRange ** 2;
         if (cooldown <= 0 && delta.lengthSq() <= detectRange ** 2) {
           face(delta, dt);
           mouth.getWorldPosition(origin);
@@ -227,6 +274,12 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
           const distance = point.length();
           forward.set(Math.sin(model.rotation.y), 0, Math.cos(model.rotation.y));
           if (delta.normalize().dot(forward) > .97 && !cast(origin, point.normalize(), distance)) {
+            if (close) {
+              state = "bite";
+              play("Bite");
+              game.events.emit("giga:motion", { moving: false });
+              return;
+            }
             aim.copy(target);
             facing.copy(forward);
             state = "roar";
@@ -251,7 +304,7 @@ const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
             waypoint++;
           } else {
             face(delta, dt);
-            if (model.position.distanceToSquared(player.pos) > 5 ** 2) {
+            if (model.position.distanceToSquared(player.pos) > (biteRange - .5) ** 2) {
               model.position.addScaledVector(delta, Math.min(distance, 3.8 * dt) / distance);
               moving = true;
             }

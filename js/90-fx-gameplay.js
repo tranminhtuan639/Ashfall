@@ -1177,6 +1177,10 @@ void main() {
             let Q = 0.55 + 0.45 * Math.sin(o * 17 + this.seed[_] * 9);
             ((q *= Q), (U *= Q * (0.6 + 0.4 * E)), (T *= Q * E));
           }
+          if (D === 4) {
+            const fade = (1 - Math.pow(M, 1.6)) ** 1.5;
+            q *= fade; U *= fade; T *= fade;
+          }
           let C = this.mode[_],
             G = 0,
             j = 1,
@@ -3430,15 +3434,15 @@ void main() {
     // that follows the jet, (7) impact fire + scorch decal + lingering ground fire where the jet hits a surface.
     const jetAcc = [0, 0, 0, 0, 0], jetFwd = new W(), jetV = new W(), jetHit = new W(), jetN = new W();
     let jetLight = null, jetIdle = 9, jetT = 0, jetGround = 0, jetScorch = 0;
-    function jetLobe(x, y, z, vx, vy, vz, life, s0, s1, core, rise, shade) {
+    function jetLobe(x, y, z, vx, vy, vz, life, s0, s1, core, rise, shade, purple) {
       const id = l.emit(x, y, z, vx, vy, vz, life, s0, s1);
       if (id < 0) return -1;
       const k = Ze(0.85, 1.15);
       l.frame[id] = ht() < 0.2 ? 7 : (ht() * 6) | 0;
-      l.ramp[id] = 2;
-      l.r[id] = (core ? 8 : 5.6) * k;
-      l.g[id] = (core ? 5 : 2.3) * k;
-      l.b[id] = (core ? 1.8 : 0.5) * k;
+      l.ramp[id] = purple ? 4 : 2;
+      l.r[id] = (purple ? (core ? 6 : 3.4) : (core ? 8 : 5.6)) * k;
+      l.g[id] = (purple ? (core ? 2.2 : .32) : (core ? 5 : 2.3)) * k;
+      l.b[id] = (purple ? (core ? 8 : 5.6) : (core ? 1.8 : .5)) * k;
       l.a[id] = 0.95;
       l.shade[id] = 2 + shade;
       l.drag[id] = core ? 1.2 : 1.6;
@@ -3454,7 +3458,7 @@ void main() {
     }
     function flameJet(origin, dir, o = {}) {
       const dt = Math.min(o.dt || 1 / 60, 0.1), reach = Math.max(1, o.reach || 16);
-      const scale = o.scale || 1, slope = o.slope || 0.27;
+      const scale = o.scale || 1, slope = o.slope || 0.27, purple = !!o.purple;
       jetFwd.copy(dir).normalize();
       jetIdle = 0;
       jetT += dt;
@@ -3472,7 +3476,7 @@ void main() {
         jetLobe(origin.x + jetV.x * sp * t, origin.y + jetV.y * sp * t, origin.z + jetV.z * sp * t,
           jetV.x * sp, jetV.y * sp, jetV.z * sp,
           core ? Ze(0.3, 0.5) : Ze(0.55, 0.95), (core ? 0.9 : 1.2) * scale, (core ? 2.2 : 3.8) * scale,
-          core, core ? 0.8 : 1.8, shade);
+          core, core ? 0.8 : 1.8, shade, purple);
       }
       // (2) additive glow
       while (jetAcc[1] >= 1) {
@@ -3482,8 +3486,8 @@ void main() {
         const id = c.emit(origin.x, origin.y, origin.z, jetV.x * sp, jetV.y * sp, jetV.z * sp,
           Ze(0.25, 0.45), 1.4 * scale, 4.2 * scale);
         if (id >= 0) {
-          c.frame[id] = V1; c.ramp[id] = 2;
-          c.r[id] = 2.6; c.g[id] = 1.15; c.b[id] = 0.3;
+          c.frame[id] = V1; c.ramp[id] = purple ? 4 : 2;
+          c.r[id] = purple ? 1.9 : 2.6; c.g[id] = purple ? .35 : 1.15; c.b[id] = purple ? 3.1 : .3;
           c.drag[id] = 1.6; c.rot[id] = ht() * 6.283; c.rotv[id] = (ht() - 0.5) * 3;
           c.fin[id] = 0.1; c.fout[id] = 0.45; c.wind[id] = 1; c.turb[id] = 1.5;
         }
@@ -3497,7 +3501,7 @@ void main() {
           jetV.x * sp, jetV.y * sp, jetV.z * sp, Ze(1.1, 2.4), 0.09 * scale, 0.03 * scale);
         if (id >= 0) {
           c.frame[id] = oo; c.ramp[id] = 3;
-          c.r[id] = 10; c.g[id] = 4.2; c.b[id] = 1;
+          c.r[id] = purple ? 7 : 10; c.g[id] = purple ? 1.4 : 4.2; c.b[id] = purple ? 10 : 1;
           c.drag[id] = 0.8; c.grav[id] = -0.6; c.turb[id] = 4; c.wind[id] = 1; c.fout[id] = 0.5;
         }
       }
@@ -3513,7 +3517,7 @@ void main() {
       }
       // (5) mouth flare
       w(origin.x + jetFwd.x * 0.4, origin.y + jetFwd.y * 0.4, origin.z + jetFwd.z * 0.4,
-        0.07, 2.2 * scale, 3.4 * scale, 7, 4.2, 1.6, oo);
+        0.07, 2.2 * scale, 3.4 * scale, purple ? 5 : 7, purple ? 2 : 4.2, purple ? 8 : 1.6, oo);
       // (6) dynamic light following the jet
       if (!jetLight) {
         const pool = y();
@@ -3521,7 +3525,8 @@ void main() {
       }
       if (jetLight) {
         const L = jetLight.light, f = 0.85 + 0.15 * Math.sin(jetT * 61 + 1.3);
-        L.color.setRGB(1, 0.42 + 0.1 * Math.sin(jetT * 47), 0.12);
+        if (purple) L.color.setRGB(.54, .11 + .04 * Math.sin(jetT * 47), 1);
+        else L.color.setRGB(1, .42 + .1 * Math.sin(jetT * 47), .12);
         L.position.set(origin.x + jetFwd.x * reach * 0.4, origin.y + jetFwd.y * reach * 0.4, origin.z + jetFwd.z * reach * 0.4);
         L.distance = 30;
         L.intensity = 160 * f;
@@ -3536,10 +3541,10 @@ void main() {
           ro(jetN, 1.1, jetV);
           const sp = Ze(2, 7);
           jetLobe(jetHit.x + jetN.x * 0.3, jetHit.y + jetN.y * 0.3, jetHit.z + jetN.z * 0.3,
-            jetV.x * sp, jetV.y * sp + 1, jetV.z * sp, Ze(0.5, 0.9), 1.1 * scale, 3.2 * scale, ht() < 0.3, 2.2, shade);
+            jetV.x * sp, jetV.y * sp + 1, jetV.z * sp, Ze(0.5, 0.9), 1.1 * scale, 3.2 * scale, ht() < 0.3, 2.2, shade, purple);
         }
         if ((jetScorch -= dt) <= 0) { jetScorch = 0.25; p.add(jetHit, jetN, "scorch", 3.2); }
-        if ((jetGround -= dt) <= 0) { jetGround = 0.8; X(jetHit.x, jetHit.y, jetHit.z, "fire", 1.6, 2.2, shade); }
+        if (!purple && (jetGround -= dt) <= 0) { jetGround = 0.8; X(jetHit.x, jetHit.y, jetHit.z, "fire", 1.6, 2.2, shade); }
       }
     }
     function ue(ee) {
@@ -7581,8 +7586,8 @@ void main() {
         (w.gain.value = me),
         (nn -= te) <= 0 && ((nn = 3 + s() * 6), (ut = 0.12 + s() * 0.88)),
         (pt += (ut - pt) * ye(0.5)),
-        Oe.rain.setGain(fe * (1 - 0.93 * P) * 0.95),
-        Oe.rainIn.setGain(fe * P * 0.95),
+        Oe.rain.setGain(fe * (1 - 0.93 * P) * 0.2),
+        Oe.rainIn.setGain(fe * P * 0.2),
         Oe.wind.setGain(fe * (0.3 + 0.7 * pt) * (1 - 0.65 * P) * 0.75),
         Oe.wind.setPitch(0.9 + 0.25 * pt),
         Oe.sea.setGain(fe * (1 - 0.5 * P) * 1),
@@ -8819,8 +8824,9 @@ void main() {
           return null;
         },
         enemyShot(n, s, { damage: o = 6, range: r = 200 } = {}) {
-          let a = i.physics.raycast(n, s, r),
-            l = a ? a.dist : r,
+          const physicsHit = i.physics.raycast(n, s, r);
+          const a = i.level?.raycastArena?.(n, s, physicsHit?.dist ?? r) || physicsHit;
+          let l = a ? a.dist : r,
             c = i.player;
           if (c && c.alive) {
             let u = nm.copy(c.pos);

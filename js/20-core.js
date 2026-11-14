@@ -6,15 +6,15 @@
       quayX: 100000,   // no quay / sea any more: ground everywhere
     },
     Mn = {
-      dir: new W(0.42, 0.78, 0.46).normalize(),   // higher sun so the 48 m walls do not swallow the floor
-      color: new Ve(1, 0.72, 0.42),
+      dir: new W(0.49, 0.68, 0.55).normalize(),   // higher sun so the 48 m walls do not swallow the floor
+      color: new Ve(1, 0.48, 0.24),
       intensity: 9,
     },
     en = {
-      zenith: new Ve(0.055, 0.085, 0.13),
-      horizon: new Ve(0.95, 0.55, 0.28),
-      horizonAway: new Ve(0.16, 0.22, 0.3),
-      fog: new Ve(0.42, 0.47, 0.52),
+      zenith: new Ve(0.10, 0.025, 0.025),
+      horizon: new Ve(1.0, 0.30, 0.09),
+      horizonAway: new Ve(0.30, 0.10, 0.07),
+      fog: new Ve(0.40, 0.21, 0.16),
     },
     Pi = {
       eye: 1.68,
@@ -269,7 +269,7 @@
             material: new Nn({ transparent: !0, opacity: 0 }),
             aspect: 4,
           }),
-          uniforms: { wet: { value: 1 } },
+          uniforms: { wet: { value: 0.25 } },
           update: Wt,
         };
       },

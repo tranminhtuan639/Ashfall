@@ -3306,6 +3306,7 @@
         "h-prompt",
         `<svg viewBox="-24 -24 48 48"><circle class="bg" r="19"/><circle class="fg" r="19" stroke-dasharray="${ix.toFixed(2)}" stroke-dashoffset="${ix.toFixed(2)}" transform="rotate(-90)"/></svg><span class="h-key">E</span><span class="h-plabel"></span>`,
       ),
+      promptRing = m.querySelector("svg"),
       A = m.querySelector(".fg"),
       _ = m.querySelector(".h-key"),
       M = m.querySelector(".h-plabel"),
@@ -3489,17 +3490,19 @@
           );
         });
       },
-      setPrompt(k, ce = 0) {
+      setPrompt(k, ce = 0, mode = "hold") {
         let ve = !!k;
+        i.input.setPrompt?.(ve && mode !== "status");
         if (
           (ve !== X.promptOn &&
             ((X.promptOn = ve),
-            m.classList.toggle("on", ve),
-            i.input.setPrompt && i.input.setPrompt(ve)),
+            m.classList.toggle("on", ve)),
           !ve)
         )
           return;
-        let _e = i.input.touch
+        const hold = mode === "hold";
+        promptRing.style.display = _.style.display = hold ? "" : "none";
+        let _e = mode === "status" ? "" : i.input.touch
           ? "USE"
           : i.input.gamepad && !i.input.locked
             ? "Y"
@@ -3508,7 +3511,7 @@
           ((X.promptKey = _e),
           (_.textContent = _e),
           _.classList.toggle("wide", _e.length > 1));
-        let Te = `Hold ${_e} \u2014 ${k}`;
+        let Te = mode === "status" ? k : mode === "press" ? `[${_e}] ${k}` : `Hold ${_e} \u2014 ${k}`;
         Te !== X.promptText && ((X.promptText = Te), (M.textContent = Te));
         let Pe = Math.round(ce * 200) / 200;
         Pe !== X.promptT &&
@@ -4337,7 +4340,7 @@
         const side = split.spawned === 0 ? -1 : 1;
         const point = splitPosition(split.origin, split.yaw, side, split.positions);
         if (!point) { split.at = c.time + .25; return; }
-        const child = spawnAnkylo(point, { size: 1, damageScale: .5, hpScale: 5 });
+        const child = spawnAnkylo(point, { size: 1, damageScale: .2 });
         if (!child) { split.at = c.time + .25; return; }
         split.positions.push(point);
         split.spawned++;
@@ -4356,7 +4359,7 @@
       } else if (offspring.delete(enemy)) {
         if (!split && !offspring.size) {
           const spawn = s.enemySpawns.filter(point => point.type === "ground").at(-1)?.pos;
-          i.giga.start(spawn ? spawn.clone().multiplyScalar(.7) : new W(28, 0, 0), 3300);
+          i.giga.start(spawn ? spawn.clone().multiplyScalar(.7) : new W(28, 0, 0), 3500);
         }
         else if (!split) o.setObjective("Hạ Ankylosaurus nhỏ · Còn " + offspring.size);
       }
@@ -4917,15 +4920,23 @@
               if (!defense.done) o.setObjective("Bảo vệ xe · " + defense.health + "%" +
                 (defense.warning ? " · Raptor đang tích điện!" : ""));
             }
+            defense.updateAmmoPickup();
             if (defense.done && !boss) spawnBoss();
           }
           if (split && c.time >= split.at) spawnOffspring();
           if (i.giga.started) {
             i.giga.update(P);
             if (_.state !== "playing") return false;
-            if (i.giga.done) return (ee(), false);
-            o.setObjective("Hạ Giganotosaurus · " + Math.ceil(i.giga.health) + "/" + i.giga.maxHealth +
-              (i.giga.burning ? " · Đang phun lửa!" : i.giga.windingUp ? " · Sắp phun lửa!" : ""));
+            if (i.giga.done) {
+              if (i.giga.purple) return (ee(), false);
+              const side = n.pos.x >= 0 ? -1 : 1;
+              const spawn = new W(side * Math.min(28, s.arena.A * .6), 0, 0);
+              i.giga.start(spawn, i.giga.maxHealth, { purpleBoss: true });
+              o.message("Giganotosaurus tím xuất hiện", 3);
+            }
+            const name = i.giga.purple ? "Giganotosaurus tím" : "Giganotosaurus";
+            o.setObjective("Hạ " + name + " · " + Math.ceil(i.giga.health) + "/" + i.giga.maxHealth +
+              (i.giga.burning ? " · Đang phun lửa!" : i.giga.windingUp ? " · Sắp phun lửa!" : i.giga.biting ? " · Đang cắn!" : ""));
           }
           (X(P),
             (c.alertT = Math.max(0, c.alertT - P)),

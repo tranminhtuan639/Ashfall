@@ -1,6 +1,8 @@
   const tekRaptorData = /*@inline:data/tek-raptor.json*/ null;
   const supplyTruckData = /*@inline:data/supply-truck.json*/ null;
 
+  const ammoCrateData = /*@inline:data/ammo-crate.json*/ null;
+
   async function loadDefenseMesh(data, skinned = false) {
     const decode = (key, Type) => new Type(assetBytes(data[key]));
     const geometry = new lt.BufferGeometry();
@@ -60,21 +62,54 @@
   }
 
   async function setupRaptorDefense(game) {
-    const [truckMesh, raptorMesh] = await Promise.all([
+    const [truckMesh, raptorMesh, ammoMesh] = await Promise.all([
       loadDefenseMesh(supplyTruckData),
       loadDefenseMesh(tekRaptorData, true),
+      loadDefenseMesh(ammoCrateData),
     ]);
     const truck = new lt.Group();
     truckMesh.quaternion.fromArray(supplyTruckData.rotation);
-    truckMesh.scale.setScalar(4.8);
+    truckMesh.scale.setScalar(5.5);
     const bounds = new lt.Box3().setFromObject(truckMesh, true);
     truckMesh.position.sub(bounds.getCenter(new W()));
     truckMesh.position.y += (bounds.max.y - bounds.min.y) / 2;
     truck.add(truckMesh);
-    truck.position.set(0, 0, 8);
+    truck.name = "supply-truck";
     game.scene.add(truck);
     const truckBounds = new lt.Box3().setFromObject(truck);
     game.physics.addBox(truckBounds.min, truckBounds.max, { surface: "metal", tag: "supply truck" });
+
+    ammoMesh.quaternion.fromArray(ammoCrateData.rotation);
+    ammoMesh.scale.setScalar(.9);
+    const ammoBounds = new lt.Box3().setFromObject(ammoMesh, true);
+    const ammoCenter = ammoBounds.getCenter(new W());
+    const ammoCrates = [-1, 1].map(side => {
+      const crate = ammoMesh.clone();
+      crate.name = "ammo-crate";
+      const pos = new W(side * (truckBounds.max.x + 2), 0, truck.position.z);
+      crate.position.copy(pos).sub(ammoCenter);
+      crate.position.y = -ammoBounds.min.y;
+      game.scene.add(crate);
+      const bounds = new lt.Box3().setFromObject(crate);
+      game.physics.addBox(bounds.min, bounds.max, { surface: "metal", tag: "ammo crate" });
+      return pos;
+    });
+
+    function updateAmmoPickup() {
+      const { player, input, weapon, hud } = game;
+      const nearby = player.alive && ammoCrates.some(pos => pos.distanceToSquared(player.pos) <= 2.1 ** 2);
+      if (!nearby) {
+        hud.setPrompt(null);
+        return;
+      }
+      const missing = weapon.reserveCapacity - weapon.reserve;
+      if (missing > 0 && input.pressed("interact")) {
+        weapon.addAmmo(missing);
+        hud.message("Đã tiếp đạn dự trữ", 1.5);
+      }
+      if (weapon.reserve >= weapon.reserveCapacity) hud.setPrompt("Đạn đã đầy", 0, "status");
+      else hud.setPrompt("Lấy đạn", 0, "press");
+    }
 
     const { rig, mixer, actions } = bindDefenseRig(tekRaptorData, raptorMesh);
     const model = new lt.Group();
@@ -97,7 +132,7 @@
     const maxTruckHealth = 100;
     const chargeTime = 1.2;
     const deathTime = 1.6;
-    const goal = new W(0, 0, 10.65);
+    const goal = new W(truck.position.x, 0, truckBounds.max.z + 1.8);
     const delta = new W();
     const ray = new lt.Ray();
     const body = new lt.Sphere(new W(), .76);
@@ -123,6 +158,7 @@
       game.fx?.explosion?.(raptor.pos.clone().add(new W(0, .7, 0)), 1.3);
     }
     return {
+      updateAmmoPickup,
       get health() { return truckHealth; },
       get done() { return state === "done"; },
       get warning() { return state === "charge"; },

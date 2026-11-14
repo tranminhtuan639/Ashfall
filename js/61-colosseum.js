@@ -6,7 +6,7 @@
   //  All the numbers you are likely to tweak live in COLOSSEUM.
   // ===========================================================================
   const COLOSSEUM = {
-    A: 51, B: 30,            // floor semi-axes -> 85 x 50 m
+    A: 54, B: 30,            // floor semi-axes -> 85 x 50 m
     PODIUM_H: 3.4,             // height of the wall round the floor (blocks bullets + players)
     PODIUM_T: 1.4,             // its thickness
     TIERS: 20, RISE: 0.85, RUN: 1.35,
@@ -333,27 +333,58 @@
       root.add(By(decor));
     }
 
-    // ---- cover on the floor ----
-    // [name, x, z, w, h, d, rotY]   (all solid; rotY only visual, kept 0 for the collider to match)
-    {
-      const blocks = [
-        ["dais", 0, 0, 10, 0.9, 10], ["dais stump", 2.2, 1.8, 1.8, 3.2, 1.8],
-        ["gate chunk", -6.5, -16.5, 3.2, 1.2, 1.4], ["gate chunk", 6.5, -16.5, 3.2, 1.2, 1.4],
-        ["fallen wall", 0, -10, 5.2, 1.5, 1.3],
-        ["fallen wall", -15, -8, 5.4, 1.6, 1.4], ["fallen wall", 15, 8, 5.4, 1.6, 1.4],
-        ["fallen column", -28, -2, 7.2, 1.7, 1.7], ["fallen column", 28, 3, 7.2, 1.7, 1.7],
-        ["fallen column", -9, 14.5, 1.7, 1.7, 7.2], ["fallen column", 11, -14, 1.7, 1.7, 6.4],
-        ["ruined wall", -24, 10, 1.4, 2.6, 5], ["ruined wall", 24, -10, 1.4, 2.6, 5],
-        ["pier", -19, -4, 1.7, 5.6, 1.7], ["pier", -19, 4, 1.7, 5.6, 1.7],
-        ["pier", 19, -4, 1.7, 5.6, 1.7], ["pier", 19, 4, 1.7, 5.6, 1.7],
-      ];
-      for (const b of blocks) box(b[0], b[0].startsWith("fallen") || b[0] === "dais" ? stone2 : stone, b[1], 0, b[2], b[3], b[4], b[5], true, 0.12);
-      // lintels resting on the two ruined portals (solid, high enough to walk under)
-      box("lintel", stone2, -19, 5.6, 0, 1.9, 1.3, 11, true, 0.1);
-      box("lintel", stone2, 19, 5.6, 0, 1.9, 1.3, 11, true, 0.1);
-      // dais steps (decor)
-      box("dais step", stone2, 0, 0, 0, 12.4, 0.35, 12.4, false, 0.05);
+    // Arena cover, leaving the middle and the side-gate approaches open.
+    const standingColumns = [[-17, 11, 4.2], [17, 13, 4.5], [19, -13, 4.1]];
+    const newBrokenColumns = [[-22, -12, 4.1], [10, 17, 4.4], [25, 8, 4.3]];
+    const intactColumns = [[-12, -17, 4.8], [12, -17, 4.8]];
+    const fallenColumns = [[-9, 9, 4.7], [10, -8, 5.2]];
+    const cover = new lt.Group();
+
+    function stoneCylinder(x, z, bottom, height, radius, topRadius, broken = false) {
+      const geometry = new lt.CylinderGeometry(topRadius, radius, height, 14);
+      if (broken) {
+        const positions = geometry.attributes.position;
+        for (let vertex = 0; vertex < positions.count; vertex++) {
+          if (positions.getY(vertex) <= 0) continue;
+          const vx = positions.getX(vertex), vz = positions.getZ(vertex);
+          positions.setY(vertex, height / 2 - .22 + vx * .13 + .1 * Math.cos(vz * 8));
+        }
+        geometry.computeVertexNormals();
+      }
+      const mesh = Qi(geometry, broken ? stone : stone2);
+      mesh.position.set(x, bottom + height / 2, z);
+      cover.add(mesh);
     }
+
+    function placeRoundColumn(x, z, height, broken) {
+      stoneCylinder(x, z, 0, .29, 1.28, 1.28);
+      stoneCylinder(x, z, .29, .19, 1.28, 1.09);
+      const shaftTop = broken ? height : height - .42;
+      stoneCylinder(x, z, .48, shaftTop - .48, 1.06, .96, broken);
+      if (!broken) {
+        stoneCylinder(x, z, shaftTop, .22, .96, 1.19);
+        stoneCylinder(x, z, height - .2, .2, 1.19, 1.19);
+      }
+      // Two intersecting boxes approximate the round footprint for movement and navigation.
+      const options = { playerOnly: true, tag: "round column" };
+      const colliderTop = broken ? height - .25 : height;
+      game.physics.addBox([x - 1.1, 0, z - .78], [x + 1.1, colliderTop, z + .78], options);
+      game.physics.addBox([x - .78, 0, z - 1.1], [x + .78, colliderTop, z + 1.1], options);
+    }
+    for (const [x, z, height] of [...standingColumns, ...newBrokenColumns]) {
+      placeRoundColumn(x, z, height, true);
+    }
+    for (const [x, z, height] of intactColumns) placeRoundColumn(x, z, height, false);
+    for (const [x, z, length] of fallenColumns) {
+      const mesh = Qi(Wi(length, 1.12, 1.45, .15), stone);
+      mesh.position.set(x, .56, z);
+      cover.add(mesh);
+      game.physics.addBox([x - length / 2, 0, z - .725],
+        [x + length / 2, 1.12, z + .725], { playerOnly: true, tag: "fallen column" });
+    }
+    const coverMeshes = By(cover);
+    root.add(coverMeshes);
+    arenaShotMeshes.push(...coverMeshes.children);
 
     // ---- rusted scaffolding hugging the wall (decor only) ----
     {
@@ -386,30 +417,35 @@
 
     // ---- braziers (emissive + small lights) ----
     for (const [bx, bz] of [[-26, -15], [26, -15], [-26, 15], [26, 15]]) {
-      const stand = Qi($e(0.7, 1.1, 0.7), steel); stand.position.set(bx, 0.55, bz); root.add(stand);
-      const fire = Qi($e(0.5, 0.45, 0.5), ember, { cast: false }); fire.position.set(bx, 1.35, bz); root.add(fire);
+      // Đã bỏ thân lò và lửa (vật cản trên sàn), chỉ giữ đèn để sân không bị tối. Bỏ comment 2 dòng dưới để trả lò về.
+      // const stand = Qi($e(0.7, 1.1, 0.7), steel); stand.position.set(bx, 0.55, bz); root.add(stand);
+      // const fire = Qi($e(0.5, 0.45, 0.5), ember, { cast: false }); fire.position.set(bx, 1.35, bz); root.add(fire);
       const l = new lt.PointLight(0xff9a50, 120, 26, 2); l.position.set(bx, 2.1, bz); root.add(l);
     }
 
-    // ---- rubble on the floor (instanced, no collision) ----
+    // Small rubble stays at the edges of cover and has no collision.
     {
-      const N = 420;
-      const rub = new lt.InstancedMesh(new lt.IcosahedronGeometry(1, 0), new lt.MeshStandardMaterial({ color: 0x77705f, roughness: 0.92, flatShading: true }), N);
-      const o = new lt.Object3D();
-      for (let i = 0; i < N; i++) {
-        let t;
-        if (rnd() < 0.6) { const w = wedges[Math.floor(rnd() * wedges.length)]; t = w[0] + (rnd() - 0.5) * w[1] * 2; }
-        else t = rnd() * TAU;
-        const f = 0.62 + rnd() * 0.36;
-        const x = A * Math.cos(t) * f, z = B * Math.sin(t) * f;
-        if (Math.abs(x) < 7 && z > 13) { o.scale.set(0, 0, 0); o.updateMatrix(); rub.setMatrixAt(i, o.matrix); continue; }
-        const s = 0.2 + Math.pow(rnd(), 2.2) * 0.95;
-        o.position.set(x, s * 0.3, z);
-        o.scale.set(s * (0.8 + rnd() * 0.6), s * (0.5 + rnd() * 0.5), s * (0.8 + rnd() * 0.6));
-        o.rotation.set(rnd() * 3, rnd() * 6, rnd() * 3);
-        o.updateMatrix(); rub.setMatrixAt(i, o.matrix);
+      const clusters = [
+        ...standingColumns.map(([x, z]) => [x, z, 1.5]),
+        ...fallenColumns.map(([x, z, length]) => [x + length / 2, z, .8]),
+      ];
+      const countPerCluster = 13;
+      const rub = new lt.InstancedMesh(new lt.IcosahedronGeometry(1, 0), stone,
+        clusters.length * countPerCluster);
+      const rock = new lt.Object3D();
+      let index = 0;
+      for (const [x, z, radius] of clusters) {
+        for (let i = 0; i < countPerCluster; i++) {
+          const angle = rnd() * TAU, distance = radius + rnd() * .8;
+          const size = .08 + rnd() ** 1.5 * .32;
+          rock.position.set(x + Math.cos(angle) * distance, size * .3, z + Math.sin(angle) * distance);
+          rock.scale.set(size, size * .65, size * (1 + rnd() * .55));
+          rock.rotation.set(rnd() * 2, angle, rnd() * 2);
+          rock.updateMatrix();
+          rub.setMatrixAt(index++, rock.matrix);
+        }
       }
-      rub.castShadow = true; rub.receiveShadow = true; rub.frustumCulled = false;
+      rub.castShadow = rub.receiveShadow = true;
       root.add(rub);
     }
 

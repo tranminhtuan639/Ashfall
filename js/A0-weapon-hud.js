@@ -2568,8 +2568,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
   }
   var gi = W,
     fm = Lt,
-    Gv = 50,
-    B_ = 250,
+    Gv = 44,
+    B_ = 352,
     O_ = 720,
     H_ = 26,
     V_ = 300,
@@ -2919,6 +2919,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         ammo: Gv,
         magSize: Gv,
         reserve: B_,
+        reserveCapacity: B_,
         state: "idle",
         ads: 0,
         spread: 0.0125,
