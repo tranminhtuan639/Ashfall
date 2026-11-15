@@ -69,7 +69,7 @@
     ]);
     const truck = new lt.Group();
     truckMesh.quaternion.fromArray(supplyTruckData.rotation);
-    truckMesh.scale.setScalar(5.5);
+    truckMesh.scale.setScalar(6.1 * 1.3);
     const bounds = new lt.Box3().setFromObject(truckMesh, true);
     truckMesh.position.sub(bounds.getCenter(new W()));
     truckMesh.position.y += (bounds.max.y - bounds.min.y) / 2;
@@ -80,13 +80,13 @@
     game.physics.addBox(truckBounds.min, truckBounds.max, { surface: "metal", tag: "supply truck" });
 
     ammoMesh.quaternion.fromArray(ammoCrateData.rotation);
-    ammoMesh.scale.setScalar(.9);
+    ammoMesh.scale.setScalar(.9 * 2);
     const ammoBounds = new lt.Box3().setFromObject(ammoMesh, true);
     const ammoCenter = ammoBounds.getCenter(new W());
     const ammoCrates = [-1, 1].map(side => {
       const crate = ammoMesh.clone();
       crate.name = "ammo-crate";
-      const pos = new W(side * (truckBounds.max.x + 2), 0, truck.position.z);
+      const pos = new W(side * (truckBounds.max.x + (ammoBounds.max.x - ammoBounds.min.x) / 2 + 1.25), 0, truck.position.z);
       crate.position.copy(pos).sub(ammoCenter);
       crate.position.y = -ammoBounds.min.y;
       game.scene.add(crate);
@@ -97,7 +97,7 @@
 
     function updateAmmoPickup() {
       const { player, input, weapon, hud } = game;
-      const nearby = player.alive && ammoCrates.some(pos => pos.distanceToSquared(player.pos) <= 2.1 ** 2);
+      const nearby = player.alive && ammoCrates.some(pos => pos.distanceToSquared(player.pos) <= 2.6 ** 2);
       if (!nearby) {
         hud.setPrompt(null);
         return;
@@ -111,6 +111,23 @@
       else hud.setPrompt("Lấy đạn", 0, "press");
     }
 
+    const transport = {
+      health: 100,
+      position: truck.position,
+      goal: new W(truck.position.x, 0, truckBounds.max.z + 1.8),
+      setReady(ready) {
+        truckMesh.material.emissive.setHex(ready ? 0x43caff : 0);
+        truckMesh.material.emissiveIntensity = ready ? 1.5 : 0;
+      },
+      nearby(pos) {
+        return truckBounds.distanceToPoint(pos) <= 2.5;
+      },
+    };
+    const raptors = Array.from({ length: 3 }, () => createDefenseRaptor(game, raptorMesh.clone(), transport));
+    return { raptors, updateAmmoPickup, transport };
+  }
+
+  function createDefenseRaptor(game, raptorMesh, transport) {
     const { rig, mixer, actions } = bindDefenseRig(tekRaptorData, raptorMesh);
     const model = new lt.Group();
     model.add(rig);
@@ -129,16 +146,16 @@
       mixer.update(0);
     }
 
-    const maxTruckHealth = 100;
     const chargeTime = 1.2;
     const deathTime = 1.6;
-    const goal = new W(truck.position.x, 0, truckBounds.max.z + 1.8);
+
     const delta = new W();
     const ray = new lt.Ray();
     const body = new lt.Sphere(new W(), .76);
     const hitPoint = new W();
     const localBody = new W(0, .98, -.3);
-    let state = "ready", remaining = 0, truckHealth = maxTruckHealth, path = [], waypoint = 0;
+    let state = "ready", remaining = 0, path = [], waypoint = 0;
+    let huntsPlayer, repath, size;
     const raptor = {
       type: "raptor", pos: model.position, hp: 180, alive: false,
       damage(amount, point) {
@@ -154,12 +171,14 @@
         return true;
       },
     };
-    function blast() {
-      game.fx?.explosion?.(raptor.pos.clone().add(new W(0, .7, 0)), 1.3);
+    function blast(customAudio = false) {
+      game.fx?.explosion?.(raptor.pos.clone().add(new W(0, .7, 0)), 1.3, { customAudio });
     }
     return {
-      updateAmmoPickup,
-      get health() { return truckHealth; },
+      get alive() { return raptor.alive; },
+      get sentryTarget() {
+        return raptor.alive ? { enemy: raptor, aimAt: out => out.copy(localBody).multiplyScalar(size).applyAxisAngle(lt.Object3D.DEFAULT_UP, model.rotation.y).add(raptor.pos) } : null;
+      },
       get done() { return state === "done"; },
       get warning() { return state === "charge"; },
       get started() { return state !== "ready"; },
@@ -167,23 +186,26 @@
         mixer.stopAllAction();
         model.visible = raptor.alive = false;
         state = "ready";
-        truckHealth = maxTruckHealth;
+
       },
-      start() {
-        const spawn = game.level.enemySpawns[0]?.pos || new W(-30, 0, 0);
-        path = game.physics.nav.findPath(spawn, goal);
-        if (!path) throw new Error("No walkable path from the Raptor spawn to the truck");
+      start(spawn, { hp = 180, scale = 1, targetPlayer = false } = {}) {
+        huntsPlayer = targetPlayer;
+        repath = 0;
+        size = scale;
+        model.scale.setScalar(9 * scale);
+        path = [];
         waypoint = 0;
         model.position.copy(spawn);
         model.visible = raptor.alive = true;
-        raptor.hp = 180;
+        raptor.hp = hp;
         state = "run";
         play("Run");
         game.events.emit("enemy:spawn", { enemy: raptor });
       },
       raycast(origin, direction, maxDistance) {
         if (!raptor.alive) return null;
-        body.center.copy(localBody).applyAxisAngle(lt.Object3D.DEFAULT_UP, model.rotation.y).add(raptor.pos);
+        body.radius = .76 * size;
+        body.center.copy(localBody).multiplyScalar(size).applyAxisAngle(lt.Object3D.DEFAULT_UP, model.rotation.y).add(raptor.pos);
         ray.set(origin, direction);
         if (!ray.intersectSphere(body, hitPoint)) return null;
         const dist = origin.distanceTo(hitPoint);
@@ -195,21 +217,25 @@
         if (!model.visible) return;
         mixer.update(dt);
         if (state === "run") {
+          const target = huntsPlayer ? game.player.pos : transport.goal;
+          if ((repath -= dt) <= 0) {
+            path = game.physics.nav.findPath(raptor.pos, target) || [];
+            waypoint = 0;
+            repath = .35;
+          }
           const next = path[waypoint];
-          delta.subVectors(next, raptor.pos);
-          model.rotation.y = Math.atan2(delta.x, delta.z);
-          const distance = delta.length();
-          const travel = dt * 6;
-          if (distance > travel) {
-            raptor.pos.addScaledVector(delta, travel / distance);
-          } else {
-            raptor.pos.copy(next);
-            if (++waypoint === path.length) {
-              model.rotation.y = Math.atan2(truck.position.x - raptor.pos.x, truck.position.z - raptor.pos.z);
-              state = "charge";
-              remaining = chargeTime;
-              play("Beam Charge", chargeTime, true);
-            }
+          if (next) {
+            delta.subVectors(next, raptor.pos);
+            const distance = delta.length();
+            if (distance > .01) model.rotation.y = Math.atan2(delta.x, delta.z);
+            if (distance > dt * 6) raptor.pos.addScaledVector(delta, dt * 6 / distance);
+            else { raptor.pos.copy(next); waypoint++; }
+          }
+          if (raptor.pos.distanceTo(target) <= (huntsPlayer ? 2.6 : .4)) {
+            state = "charge";
+            remaining = chargeTime;
+            play("Beam Charge", chargeTime, true);
+            game.events.emit("raptor:charge", { pos: raptor.pos });
           }
           return;
         }
@@ -217,15 +243,25 @@
         if (remaining > 0) return;
         if (state === "charge") {
           blast();
-          truckHealth = Math.max(0, truckHealth - 25);
+          if (huntsPlayer) {
+            const player = game.player;
+            const source = raptor.pos.clone().setY(.7);
+            const offset = player.pos.clone().add(new W(0, .9, 0)).sub(source);
+            const distance = offset.length();
+            if (distance > .001 && distance < 4 &&
+                !game.physics.raycast(source, offset.normalize(), distance) &&
+                !game.level.raycastArena?.(source, offset, distance)) {
+              player.damage(35, raptor.pos);
+            }
+          } else transport.health = Math.max(0, transport.health - 25);
           state = "cooldown";
           remaining = 3;
         } else if (state === "cooldown") {
-          state = "charge";
-          remaining = chargeTime;
-          play("Beam Charge", chargeTime, true);
+          state = "run";
+          repath = 0;
+          play("Run");
         } else if (state === "dying") {
-          blast();
+          blast(true);
           model.visible = false;
           state = "done";
         }

@@ -332,3 +332,14 @@ kbd { display: inline-block; font: 500 10px/1 var(--f-mono); color: var(--bone);
 
 .h-relays,[data-f="dead-relays"],.m-stats div:has([data-f="dead-relays"]){display:none!important}
 
+
+.h-boss-health {
+  position: absolute; top: calc(78px + var(--sat)); left: 50%;
+  transform: translateX(-50%); width: min(560px, 70vw); height: 9px;
+  border: 1px solid #a78a72; background: #231513; box-shadow: 0 2px 7px #000;
+}
+.h-boss-health > i { display: block; height: 100%; background: linear-gradient(#cf3636, #721416); transform-origin: left; }
+.h-transport-health {
+  position: absolute; top: calc(78px + var(--sat)); left: 50%; transform: translateX(-50%);
+  padding: 4px 10px; color: var(--bone); background: var(--plate); font: 600 14px var(--f-label);
+}

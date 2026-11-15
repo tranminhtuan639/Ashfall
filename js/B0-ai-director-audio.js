@@ -1839,7 +1839,7 @@
         },
         _activate(T, D = {}) {
           m.size = D.size ?? ANKYLOSAURUS_SIZE;
-          m.maxHp = Gt.hp * (D.hpScale ?? 1);
+          m.maxHp = D.hp ?? Gt.hp * (D.hpScale ?? 1);
           m.damageScale = D.damageScale ?? 1;
           ((m.active = !0),
             (m.alive = !0),
@@ -2659,7 +2659,7 @@
       exposureUp: 0.1,
       exposureDown: 0.45,
       poolGulls: 10,
-      poolHounds: 8,
+      poolHounds: 10,
       maxWrecks: 5,
       maxBolts: 32,
     },
@@ -2858,6 +2858,11 @@
             (G.len = 0));
         },
         addWreck(T) {
+          if (i.campaign) {
+            // Leave the pool intact during the damage callback; retire at the next update.
+            n.push(T);
+            return;
+          }
           for (n.push(T); n.length > Ui.maxWrecks; ) {
             let D = n.shift();
             D.active && (D.sink = 0.001);
@@ -3057,11 +3062,9 @@
                 }),
               N._raycast(T, D, C, G));
           }
-          const raptorHit = i.defense?.raycast(T, D, Math.min(C, G?.dist ?? C));
-          const gigaHit = i.giga?.raycast(T, D, raptorHit?.dist ?? Math.min(C, G?.dist ?? C));
-          let closest = gigaHit || raptorHit || (G && G.enemy ? G : null);
-          for (const bossEnemy of [i.spino, ...(i.gigaReinforcements || [])]) {
-            closest = bossEnemy?.raycast(T, D, closest?.dist ?? C) || closest;
+          let closest = G?.enemy ? G : null;
+          for (const unit of [...(i.defense?.raptors || []), ...(i.gigas || []), i.spino]) {
+            closest = unit?.raycast(T, D, closest?.dist ?? C) || closest;
           }
           return closest;
         },
@@ -3098,6 +3101,7 @@
             let C = D.vel ? Math.hypot(D.vel.x, D.vel.z) : D.speed || 0;
             h.playerSpeed += (C - h.playerSpeed) * (1 - Math.exp(-6 * T));
           }
+          if (i.campaign) while (n.length) h.retire(n[n.length - 1]);
           for (let C = t.length - 1; C >= 0; C--) t[C]._update(T);
           (_(T), H(T));
         },
@@ -3257,6 +3261,13 @@
     let e = document.getElementById("ui"),
       t = li("div", "hud");
     t.setAttribute("aria-hidden", "true");
+    const bossHealth = li("div", "h-boss-health", "<i></i>");
+    const transportHealth = li("div", "h-transport-health",
+      '<span>Transport</span><div style="height:9px;background:#132334;border:1px solid #7396ad;margin-top:4px"><i style="display:block;height:100%;background:#32a6ee;transform-origin:left"></i></div>');
+    transportHealth.style.width = "min(360px, 65vw)";
+    transportHealth.style.textAlign = "center";
+    bossHealth.hidden = transportHealth.hidden = true;
+    t.append(bossHealth, transportHealth);
     let n = li("div", "h-compass"),
       s = li("div", "h-tape"),
       o = "";
@@ -3340,7 +3351,7 @@
     let j = li(
       "div",
       "comms",
-      '<span class="comms-who">Control</span><span class="comms-t"></span>',
+      '<span class="comms-who">Handler</span><span class="comms-t"></span>',
     );
     (j.setAttribute("role", "status"), j.setAttribute("aria-live", "polite"));
     let N = j.querySelector(".comms-t");
@@ -3436,6 +3447,14 @@
         ((k = !!k),
           k !== Q && ((Q = k), t.classList.toggle("on", k), k && R()));
       },
+      setBossHealth(value) {
+        bossHealth.hidden = value == null;
+        if (value != null) bossHealth.firstElementChild.style.transform = "scaleX(" + value + ")";
+      },
+      setTransportHealth(value) {
+        transportHealth.hidden = value == null;
+        if (value != null) transportHealth.querySelector("i").style.transform = "scaleX(" + (value / 100) + ")";
+      },
       setObjective(k) {
         ((k = k || ""),
           k !== re &&
@@ -3523,10 +3542,11 @@
           A.setAttribute("stroke-dashoffset", (ix * (1 - Pe)).toFixed(2)),
           m.classList.toggle("busy", Pe > 0));
       },
-      radio(k, ce = 4.5) {
-        k && me.push({ text: k, secs: ce });
+      radio(k, ce = 4.5, voice = null) {
+        k && me.push({ text: k, secs: ce, voice });
       },
       clearRadio() {
+        i.audio?.stopHandlerVoice?.();
         ((me.length = 0), (ee = null), j.classList.remove("on"));
       },
       warn(k, ce = 3) {
@@ -3567,7 +3587,7 @@
         } catch {}
       },
       reset() {
-        ((me.length = 0), (ee = null), j.classList.remove("on"));
+        I.clearRadio();
         for (let k of Z) k.el.remove();
         Z.length = 0;
         for (let k of b) k.life = 0;
@@ -3766,15 +3786,20 @@
       }
     }
     function ae(k) {
+      if (i.game?.state === "paused") return;
       if (!ee) {
         if (!me.length) return;
         ((ee = me.shift()),
           (B = 0),
           (P = 0),
           (V = ee.secs),
-          (N.textContent = ""),
+          (N.textContent = ee.voice ? ee.text : ""),
           j.classList.add("on"),
           i.events.emit("radio:line", { text: ee.text }));
+        if (ee.voice) {
+          B = ee.text.length;
+          i.audio?.playHandlerVoice?.(ee.voice);
+        }
       }
       let ce = ee.text;
       if (B < ce.length) {
@@ -3885,7 +3910,7 @@
 
     <section class="m-screen m-card m-debrief" data-s="complete" aria-label="Debrief">
       <div class="m-k">Kết quả đấu trường</div>
-      <h2 class="m-h">Chiến thắng</h2>
+      <h2 class="m-h">Challenge Complete!</h2>
       <div class="m-rating"><span>Rating</span><b data-f="rating">Clean</b></div>
       <dl class="m-stats">
         <div><dt>Time</dt><dd data-f="time">00:00</dd></div>
@@ -4194,7 +4219,7 @@
     ],
     _l = {
       intro:
-        "Breacher, this is Control. The Harbormaster holds the berth. Cut its three uplinks \u2014 yard, shed, quay.",
+        "Private, this is Handler. Move into the arena and secure the transport.",
       contact: "It has seen you. Gulls fly, Hounds walk. Put them down.",
       cut: [
         "One relay dark. It felt that \u2014 machines inbound.",
@@ -4298,75 +4323,15 @@
         (u = 0),
         i.events.emit("game:state", { state: P, prev: V }));
     }
-    let boss = null;
-    let bossMaxHp = 0;
-    let split = null;
-    const offspring = new Set();
-
-    function spawnAnkylo(position, options) {
-      const towardPlayer = new W().subVectors(n.pos, position);
-      return i.enemies.spawn("hound", position, {
-        state: "alert",
-        target: n.pos,
-        yaw: Math.atan2(towardPlayer.x, towardPlayer.z),
-        ...options,
-      });
-    }
-
-    function spawnBoss() {
-      const side = s.enemySpawns.find(point => point.type === "ground")?.pos;
-      const spawn = side ? side.clone().multiplyScalar(.72) : new W(12, 0, 0);
-      boss = spawnAnkylo(spawn, { hpScale: 10 });
-      if (boss) {
-        bossMaxHp = boss.maxHp;
-        o.setObjective("Hạ Ankylosaurus lớn");
-      }
-    }
-
-    function splitPosition(origin, yaw, side, occupied) {
-      const nav = i.physics.nav;
-      for (let radius = 3.2; radius <= 20; radius += 1.2) {
-        for (const offset of [0, .4, -.4, .8, -.8, 1.2, -1.2, Math.PI]) {
-          const angle = yaw + side * Math.PI / 2 + offset;
-          const point = new W(origin.x + Math.sin(angle) * radius, 0,
-            origin.z + Math.cos(angle) * radius);
-          if (point.distanceToSquared(n.pos) < 4 ||
-              occupied.some(other => other.distanceToSquared(point) < 4) ||
-              !nav.isWalkable(point.x, point.z) || !nav.findPath(point, n.pos)) continue;
-          return point;
-        }
-      }
-      return null;
-    }
-
-    function spawnOffspring() {
-      while (split.spawned < 2) {
-        const side = split.spawned === 0 ? -1 : 1;
-        const point = splitPosition(split.origin, split.yaw, side, split.positions);
-        if (!point) { split.at = c.time + .25; return; }
-        const child = spawnAnkylo(point, { size: 1, damageScale: .2 });
-        if (!child) { split.at = c.time + .25; return; }
-        split.positions.push(point);
-        split.spawned++;
-        offspring.add(child);
-      }
-      split = null;
-      o.setObjective("Hạ Ankylosaurus nhỏ · Còn " + offspring.size);
-    }
-
-    i.events.on("enemy:killed", ({ enemy, turretPos }) => {
-      if (_.state !== "playing") return;
-      if (enemy === boss && !split) {
-        i.fx?.explosion?.(turretPos || enemy.pos, 2.3);
-        split = { at: c.time + .55, origin: enemy.pos.clone(), yaw: enemy.yaw, spawned: 0, positions: [] };
-        o.setObjective("Hai Ankylosaurus nhỏ sắp xuất hiện");
-      } else if (offspring.delete(enemy)) {
-        if (!split && !offspring.size) {
-          const spawn = s.enemySpawns.filter(point => point.type === "ground").at(-1)?.pos;
-          i.giga.start(spawn ? spawn.clone().multiplyScalar(.7) : new W(28, 0, 0), 3500);
-        }
-        else if (!split) o.setObjective("Hạ Ankylosaurus nhỏ · Còn " + offspring.size);
-      }
+    const sentries = createArenaSentries(i);
+    const campaign = i.campaign = createArenaCampaign(i, ee, () => {
+      o.setPrompt(null);
+      o.show(false);
+      r.setGameplay?.(false);
+      r.exitLock();
+      n.enabled = false;
+      l.setDead({ time: c.time, relays: 0, total: 0, reason: "The transport was destroyed" });
+      M("dead");
     });
     let E = { pos: [], look: [], len: 1, t: 0 };
     function w() {
@@ -4474,13 +4439,8 @@
         (e.flash = 0),
         q(),
         o.setRelays && o.setRelays(0, c.relays.length));
-      i.defense.reset();
-      i.giga.reset();
-      i.spino.reset();
-      for (const ally of i.gigaReinforcements) ally.reset();
-      boss = null;
-      split = null;
-      offspring.clear();
+      sentries.reset();
+      campaign.reset();
     }
     function O(P, V) {
       try {
@@ -4764,10 +4724,7 @@
       return !1;
     }
     (i.events.on("enemy:alert", () => {
-      ((c.alertT = 10),
-        _.state === "playing" &&
-          !c.contactSaid &&
-          ((c.contactSaid = !0), o.radio && o.radio(_l.contact, 3.2)));
+      c.alertT = 10;
     }),
       i.events.on("player:hit", () => {
         c.alertT = Math.max(c.alertT, 8);
@@ -4908,62 +4865,8 @@
           )
             return (G(), !1);
           if (!s.hasEnteredArena || s.hasEnteredArena()) {
-            const defense = i.defense;
-            if (!defense.started) defense.start();
-            if (!defense.done) {
-              defense.update(P);
-              if (defense.health === 0) {
-                o.setPrompt?.(null);
-                o.show(false);
-                r.setGameplay?.(false);
-                r.exitLock();
-                n.enabled = false;
-                l.setDead({ time: c.time, relays: c.cut, total: c.relays.length,
-                  reason: "Xe tiếp tế đã bị phá hủy" });
-                M("dead");
-                return false;
-              }
-              if (!defense.done) o.setObjective("Bảo vệ xe · " + defense.health + "%" +
-                (defense.warning ? " · Raptor đang tích điện!" : ""));
-            }
-            defense.updateAmmoPickup();
-            if (defense.done && !boss) spawnBoss();
-          }
-          if (split && c.time >= split.at) spawnOffspring();
-          if (i.spino.started) {
-            i.spino.update(P);
-            for (const ally of i.gigaReinforcements) {
-              if (_.state !== "playing") return false;
-              if (ally.started && !ally.done) ally.update(P);
-            }
-            if (_.state !== "playing") return false;
-            if (i.spino.done && i.gigaReinforcements.every(ally => ally.done)) return (ee(), false);
-            const remaining = i.gigaReinforcements.filter(ally => ally.started && ally.health > 0).length;
-            o.setObjective("Spinosaurus · " + Math.ceil(i.spino.health) + "/6000" + i.spino.status +
-              (remaining ? " · Giga tím còn " + remaining : ""));
-          } else if (i.giga.started) {
-            i.giga.update(P);
-            if (_.state !== "playing") return false;
-            if (i.giga.done) {
-              if (i.giga.purple) {
-                const east = new W(s.arena.A - 11, 0, 0);
-                i.spino.start(east, position => {
-                  i.gigaReinforcements.forEach((ally, index) => {
-                    const spawn = position.clone().add(new W(-6, 0, index === 0 ? -10 : 10));
-                    ally.start(spawn, 2000, { purpleBoss: true });
-                  });
-                });
-                o.message("Spinosaurus xuất hiện ở phía Đông", 4);
-                return true;
-              }
-              const side = n.pos.x >= 0 ? -1 : 1;
-              const spawn = new W(side * Math.min(28, s.arena.A * .6), 0, 0);
-              i.giga.start(spawn, i.giga.maxHealth, { purpleBoss: true });
-              o.message("Giganotosaurus tím xuất hiện", 3);
-            }
-            const name = i.giga.purple ? "Giganotosaurus tím" : "Giganotosaurus";
-            o.setObjective("Hạ " + name + " · " + Math.ceil(i.giga.health) + "/" + i.giga.maxHealth +
-              (i.giga.burning ? " · Đang phun lửa!" : i.giga.windingUp ? " · Sắp phun lửa!" : i.giga.biting ? " · Đang cắn!" : ""));
+            if (!campaign.update(P)) return false;
+            sentries.update(P);
           }
           (X(P),
             (c.alertT = Math.max(0, c.alertT - P)),

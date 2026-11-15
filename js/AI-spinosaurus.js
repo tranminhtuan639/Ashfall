@@ -14,28 +14,7 @@
     const chin = rig.getObjectByName("Chin_Tip");
     const mouth = new W(), lowerJaw = new W(), target = new W(), direction = new W();
     const locked = new W(), offset = new W(), up = new W(0, 1, 0);
-    const beam = new lt.Group();
-    const tube = new lt.CylinderGeometry(1, 1, 1, 12, 1, true);
-    function energyMaterial(color, opacity) {
-      return new lt.MeshBasicMaterial({ color, opacity, transparent: true,
-        blending: lt.AdditiveBlending, depthWrite: false, toneMapped: false });
-    }
-    const core = new lt.Mesh(tube, energyMaterial(0xdfffff, .95));
-    const halo = new lt.Mesh(tube, energyMaterial(0x5279ff, .45));
-    beam.add(core, halo);
-    const arcVertices = new lt.BufferAttribute(new Float32Array(3 * 17 * 3), 3);
-    for (let i = 0; i < 3; i++) {
-      const arc = new lt.Line(new lt.BufferGeometry(), new lt.LineBasicMaterial({ color: i === 0 ? 0xd0faff : 0x8580ff,
-        transparent: true, opacity: .9, blending: lt.AdditiveBlending, depthWrite: false, toneMapped: false }));
-      // Each line reads its own section of the shared vertex buffer.
-      const geometry = arc.geometry;
-      geometry.setAttribute("position", arcVertices);
-      geometry.setDrawRange(i * 17, 17);
-      arc.frustumCulled = false;
-      beam.add(arc);
-    }
-    const charge = new lt.Mesh(new lt.IcosahedronGeometry(1, 2), energyMaterial(0x8ee6ff, .85));
-    game.scene.add(beam, charge);
+    const beamFx = createSpinoBeamFx(game);   // hiệu ứng nhìn của beam: AJ-spino-beam.js
 
     const ray = new lt.Ray(), hitPoint = new W();
     const hitboxes = [["Hips", 2.9], ["Spine_2001", 3.5], ["Head", 2.1], ["Nose", 1.35]]
@@ -48,12 +27,18 @@
     const audio = (cue, pos = mouth, variant = 0) => game.events.emit("spino:audio", { cue, pos, variant });
     let roarVariant = 0;
     const beamOn = 3.71, beamOff = 5.85;
-    let state, action, cooldown, nextBeam, path, waypoint, repath, summon;
+    let state, action, cooldown, nextBeam, path, waypoint, repath, summon, afterRoar, halfHealth, halfHealthTriggered;
     const enemy = {
       type: "spinosaurus", pos: model.position, alive: false, hp: 0,
       damage(amount, point) {
-        if (!this.alive || !(amount > 0) || state === "intro") return false;
-        this.hp = Math.max(0, this.hp - amount);
+        if (!this.alive || !(amount > 0) || isSummoning()) return false;
+        const nextHealth = Math.max(0, this.hp - amount);
+        const reachedHalf = !halfHealthTriggered && halfHealth && nextHealth <= halfHealth.hp;
+        this.hp = reachedHalf ? halfHealth.hp : nextHealth;
+        if (reachedHalf) {
+          halfHealthTriggered = true;
+          beginSummon(halfHealth.onComplete);
+        }
         game.events.emit("enemy:hit", { enemy: this, pos: point, damage: amount });
         if (this.hp) return false;
         this.alive = false;
@@ -68,6 +53,19 @@
       },
     };
 
+    function isSummoning() { return state === "intro" || state === "summoning"; }
+    function beginSummon(onComplete) {
+      state = "summoning";
+      afterRoar = onComplete;
+      hideEnergy();
+      audio("stop");
+      action = null; // Always restart Roar, including when it interrupts a fire attack.
+      play("Roar");
+      updateMouth();
+      audio("roar", mouth, roarVariant);
+      roarVariant = 1 - roarVariant;
+    }
+
     function play(name) {
       const next = actions.get(name);
       if (next === action && next.isRunning()) return;
@@ -79,7 +77,7 @@
       action.play();
       mixer.update(0);
     }
-    function hideEnergy() { beam.visible = charge.visible = false; }
+    function hideEnergy() { beamFx.hide(); }
     game.events.on("player:dead", () => { hideEnergy(); audio("stop"); });
     function updateMouth() {
       nose.getWorldPosition(mouth);
@@ -106,25 +104,9 @@
           !cast(mouth, offset.normalize(), distance)) game.player.damage(damage * dt, mouth);
     }
     function fireBeam(dt) {
-      const length = cast(mouth, locked, 48)?.dist ?? 48;
-      beam.visible = length > .02;
-      charge.visible = true;
-      charge.position.copy(mouth);
-      charge.scale.setScalar(.58 + .09 * Math.sin(action.time * 91));
-      beam.position.copy(mouth);
-      beam.quaternion.setFromUnitVectors(up, locked);
-      const pulse = 1 + .11 * Math.sin(action.time * 115);
-      core.position.y = halo.position.y = length / 2;
-      core.scale.set(.22 * pulse, length, .22 * pulse);
-      halo.scale.set(.65 * pulse, length, .65 * pulse);
-      for (let line = 0; line < 3; line++) {
-        for (let step = 0; step <= 16; step++) {
-          const t = step / 16, amp = .58 * Math.sin(t * Math.PI);
-          const phase = action.time * 61 + line * 2.1 + step * 2.6;
-          arcVertices.setXYZ(line * 17 + step, amp * Math.sin(phase), length * t, amp * Math.cos(phase * 1.3));
-        }
-      }
-      arcVertices.needsUpdate = true;
+      const hit = cast(mouth, locked, 48), length = hit?.dist ?? 48;
+      if (length > .02) beamFx.fire(mouth, locked, length, hit, dt);
+      else beamFx.hide();
       damageInJet(locked, length, .82, 0, 48, dt);
     }
     function reset() {
@@ -140,17 +122,28 @@
       reset,
       get started() { return state !== "ready"; },
       get done() { return state === "done"; },
+      get alive() { return enemy.alive; },
+      summonReinforcements(onComplete) {
+        if (!enemy.alive || isSummoning()) return false;
+        beginSummon(onComplete);
+        return true;
+      },
       get health() { return enemy.hp; },
+      get sentryTarget() {
+        return enemy.alive && !isSummoning() ? { enemy: enemy, aimAt: out => hitboxes[1].bone.getWorldPosition(out) } : null;
+      },
       get status() {
-        if (state === "intro") return " · Đang gọi viện";
-        if (state === "beam") return beam.visible ? " · Đang bắn sét!" : action.time < beamOn ? " · Đang nạp sét!" : "";
+        if (isSummoning()) return " · Đang gọi viện";
+        if (state === "beam") return beamFx.firing ? " · Đang bắn sét!" : action.time < beamOn ? " · Đang nạp sét!" : "";
         return state === "fire" ? " · Phun lửa tím!" : "";
       },
-      start(position, onSummon) {
+      start(position, onSummon, health = 6000, onHalfHealth) {
         summon = onSummon;
+        halfHealth = onHalfHealth ? { hp: health / 2, onComplete: onHalfHealth } : null;
+        halfHealthTriggered = false;
         model.position.copy(position);
         model.rotation.y = Math.atan2(game.player.pos.x - position.x, game.player.pos.z - position.z);
-        enemy.hp = 6000;
+        enemy.hp = health;
         model.visible = enemy.alive = true;
         cooldown = 1;
         repath = waypoint = 0;
@@ -164,7 +157,7 @@
         game.events.emit("enemy:spawn", { enemy });
       },
       raycast(origin, dir, range) {
-        if (!enemy.alive || state === "intro") return null;
+        if (!enemy.alive || isSummoning()) return null;
         ray.set(origin, dir);
         let nearest = null;
         for (const { bone, sphere } of hitboxes) {
@@ -184,11 +177,14 @@
         const finished = action.time >= action.getClip().duration - .001;
         target.copy(game.player.pos).setY(game.player.pos.y + .95);
         updateMouth();
-        if (state === "intro") {
+        if (isSummoning()) {
           if (finished) {
-            summon(model.position);
+            const onComplete = state === "intro" ? summon : afterRoar;
             state = "move";
+            cooldown = 1;
+            repath = 0;
             play("Idle");
+            onComplete(model.position);
           }
           return;
         }
@@ -200,9 +196,10 @@
           if (action.time < beamOn) {
             lookAtPlayer(dt);
             updateMouth();
-            charge.visible = action.time >= 1.2;
-            charge.position.copy(mouth);
-            charge.scale.setScalar(.18 + .38 * lt.MathUtils.smoothstep(action.time, 1.2, beamOn));
+            if (action.time >= 1.2) {
+              direction.subVectors(target, mouth).normalize();
+              beamFx.charge(mouth, direction, lt.MathUtils.smoothstep(action.time, 1.2, beamOn), dt);
+            } else beamFx.hide();
           } else if (action.time < beamOff) {
             if (previous < beamOn) {
               locked.subVectors(target, mouth).normalize();

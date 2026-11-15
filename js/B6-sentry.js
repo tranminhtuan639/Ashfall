@@ -1,0 +1,135 @@
+  const sentryGunData = /*@inline:data/sentry-gun.json*/ null;
+
+  const sentryMountData = /*@inline:data/sentry-mount.json*/ null;
+
+  function createArenaSentries(game) {
+    const sentries = [];
+    const range = 27;
+    const damage = 8;
+    const interval = .2;
+    const secondShotDelay = .075;
+    const scale = 1.15 * 1.2 * 1.2;
+    const clearance = 1.08 * 1.2;
+    const gunModel = game.sentryGun;
+    const position = new W(), forward = new W();
+    const turretForward = new W(0, 0, 1);
+    const eye = new W(), origin = new W(), aim = new W(), direction = new W();
+
+    function wallDistance(from, dir, limit) {
+      const physicsHit = game.physics.raycast(from, dir, limit);
+      const meshHit = game.level.raycastArena?.(from, dir, physicsHit?.dist ?? limit);
+      return meshHit?.dist ?? physicsHit?.dist ?? limit;
+    }
+
+    function remove(sentry, explode) {
+      game.scene.remove(sentry.base);
+      if (explode) game.fx?.explosion?.(sentry.base.position.clone().setY(sentry.base.position.y + .6), .75);
+    }
+
+    function place() {
+      const { player, physics, level } = game;
+      if (!player.onGround) return false;
+      forward.copy(player.forward).setY(0).normalize();
+      if (forward.lengthSq() < .01) return false;
+      position.copy(player.pos).addScaledVector(forward, 2.2);
+      const { A, B } = level.arena;
+      if ((position.x / (A - .8)) ** 2 + (position.z / (B - .8)) ** 2 >= 1) return false;
+      if (!physics.nav.isWalkable(position.x, position.z)) return false;
+      position.y = physics.groundHeight(position.x, position.z, player.pos.y + .35);
+      if (Math.abs(position.y - player.pos.y) > .35) return false;
+      if (physics.boxes.some(box =>
+        position.x + clearance > box.min.x && position.x - clearance < box.max.x &&
+        position.z + clearance > box.min.z && position.z - clearance < box.max.z &&
+        position.y + 1.63 * 1.2 > box.min.y && position.y + .03 < box.max.y)) return false;
+      if (sentries.some(sentry => sentry.base.position.distanceToSquared(position) < (1.62 * 1.2) ** 2)) return false;
+      eye.copy(player.pos).y += .85;
+      direction.copy(position).add(new W(0, .65, 0)).sub(eye);
+      const distance = direction.length();
+      if (wallDistance(eye, direction.normalize(), distance) < distance - .02) return false;
+
+      const base = new lt.Group();
+      const pivot = new lt.Group();
+      const mount = game.sentryMount.clone();
+      const heading = Math.atan2(forward.x, forward.z);
+      mount.quaternion.fromArray(sentryMountData.rotation).premultiply(
+        new lt.Quaternion().setFromAxisAngle(lt.Object3D.DEFAULT_UP, heading - Math.PI / 2));
+      // Center the top of the mount beneath the gun's pivot.
+      mount.position.copy(forward).multiplyScalar(.022);
+      base.add(mount);
+      const gun = gunModel.clone();
+      gun.quaternion.fromArray(sentryGunData.rotation).premultiply(
+        new lt.Quaternion().setFromAxisAngle(lt.Object3D.DEFAULT_UP, -Math.PI / 2));
+      gun.position.set(0, -.347, .06);
+      pivot.add(gun);
+      pivot.position.y = .88;
+      pivot.quaternion.setFromUnitVectors(turretForward, forward);
+      base.add(pivot);
+      base.position.copy(position);
+      base.scale.setScalar(scale);
+      if (sentries.length === 2) remove(sentries.shift(), true);
+      game.scene.add(base);
+      sentries.push({ base, pivot, cooldown: .2, followUp: null });
+      return true;
+    }
+
+    function fire(sentry, candidates) {
+      sentry.pivot.getWorldPosition(origin);
+      // Cast against the existing combat hitboxes so other enemies and cover can block the shot.
+      for (const target of candidates) {
+        if (!target.enemy.alive) continue;
+        target.aimAt(aim);
+        direction.subVectors(aim, origin);
+        const distance = direction.length();
+        if (distance < 1 || distance > range) continue;
+        direction.multiplyScalar(1 / distance);
+        const hit = game.enemies.raycast(origin, direction, wallDistance(origin, direction, range));
+        if (hit?.enemy !== target.enemy) continue;
+        sentry.pivot.quaternion.setFromUnitVectors(turretForward, direction);
+        const muzzle = origin.clone().addScaledVector(direction, .80 * scale);
+        game.fx?.muzzleFlash?.(muzzle, direction, { scale: .65 });
+        game.fx?.tracer?.(muzzle, hit.point, { trail: false, intensity: 10 });
+        game.audio?.play?.("sentry_shot", { pos: muzzle, gain: .65 });
+        const killed = hit.enemy.damage(damage, hit.point, direction, "body") === true;
+        game.events.emit("impact", { ...hit, from: "turret", dir: direction, killed, surface: "enemy" });
+        return true;
+      }
+      return false;
+    }
+
+    return {
+      reset() {
+        for (const sentry of sentries) remove(sentry, false);
+        sentries.length = 0;
+      },
+      update(dt) {
+        if (game.player.alive && game.input.pressed("deploySentry") && !place()) {
+          game.hud.message("Không thể đặt trụ ở đây", 1.4);
+        }
+        if (!sentries.length) return;
+        const candidates = game.enemies.list.filter(enemy => enemy.alive).map(enemy => ({
+          enemy,
+          aimAt(out) {
+            out.copy(enemy.pos).y += enemy.type === "hound" ? .49 * enemy.size : 0;
+          },
+        }));
+        for (const unit of [...game.defense.raptors, ...game.gigas, game.spino]) {
+          const target = unit.sentryTarget;
+          if (target) candidates.push(target);
+        }
+        for (const sentry of sentries) {
+          sentry.cooldown -= dt;
+          if (sentry.followUp != null && (sentry.followUp -= dt) <= 0) {
+            candidates.sort((a, b) => a.enemy.hp - b.enemy.hp);
+            fire(sentry, candidates);
+            sentry.followUp = null;
+          }
+          if (sentry.cooldown > 0 || sentry.followUp != null) continue;
+          candidates.sort((a, b) => a.enemy.hp - b.enemy.hp);
+          if (fire(sentry, candidates)) {
+            sentry.cooldown = Math.max(secondShotDelay, sentry.cooldown + interval);
+            sentry.followUp = secondShotDelay;
+          } else sentry.cooldown = .05;
+        }
+      },
+    };
+  }

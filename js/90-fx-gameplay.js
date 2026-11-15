@@ -2883,7 +2883,7 @@ void main() {
       f.add(ee, B);
     }
     let Q = { pos: new W(), size: 1 };
-    function K(ee, B = 1) {
+    function K(ee, B = 1, { customAudio = false } = {}) {
       let P = Math.max(0.4, Math.min(B, 4)),
         V = ee.x,
         Y = ee.y,
@@ -3091,6 +3091,7 @@ void main() {
         ),
         Q.pos.copy(ee),
         (Q.size = B),
+        (Q.customAudio = customAudio),
         i.events.emit("explosion", Q));
     }
     let ie = [];
@@ -3547,10 +3548,123 @@ void main() {
         if (!purple && (jetGround -= dt) <= 0) { jetGround = 0.8; X(jetHit.x, jetHit.y, jetHit.z, "fire", 1.6, 2.2, shade); }
       }
     }
+    // ---- beamJet: hạt + đèn + vết cháy cho tia sét năng lượng (gọi mỗi frame khi beam đang bắn) ----
+    // Thân beam (shader plasma, sét ribbon) do module của boss vẽ; ở đây chỉ phát (1) tia lửa điện tạt ra từ thân beam,
+    // (2) chấm sáng trôi dọc beam, (3) flare ở miệng, (4) 2 đèn động nhấp nháy, (5) chỗ chạm: tia lửa văng, khói, vết cháy.
+    const beamAcc = [0, 0, 0, 0, 0, 0], beamFwd = new W(), beamU = new W(), beamR = new W(), beamV = new W(), beamP = new W();
+    const beamHit = new W(), beamN = new W(), beamLights = [null, null];
+    let beamIdle = 9, beamT = 0, beamScorch = 0;
+    function beamLobe(x, y, z, vx, vy, vz, life, s0, s1, cr, cg, cb, rise, shade) {
+      const id = l.emit(x, y, z, vx, vy, vz, life, s0, s1);
+      if (id < 0) return -1;
+      const k = Ze(0.85, 1.15);
+      l.frame[id] = (ht() * 6) | 0;
+      l.ramp[id] = 4;
+      l.r[id] = cr * k; l.g[id] = cg * k; l.b[id] = cb * k;
+      l.a[id] = 0.9; l.shade[id] = 2 + shade;
+      l.drag[id] = 1.8; l.grav[id] = -rise; l.wind[id] = 0.6; l.turb[id] = 1.6;
+      l.rot[id] = ht() * 6.283; l.rotv[id] = (ht() - 0.5) * 3;
+      l.sk[id] = 2; l.fin[id] = 0.05; l.fout[id] = 0.55;
+      return id;
+    }
+    function beamSpark(x, y, z, vx, vy, vz, life, size, grav, r, g, b) {
+      const id = c.emit(x, y, z, vx, vy, vz, life, size, size * 0.25);
+      if (id < 0) return -1;
+      c.mode[id] = 1; c.frame[id] = Gc; c.stretch[id] = 0.012; c.grav[id] = grav;
+      c.r[id] = r; c.g[id] = g; c.b[id] = b; c.flags[id] = Xc; c.ramp[id] = 3;
+      return id;
+    }
+    function beamJet(origin, dir, o = {}) {
+      const dt = Math.min(o.dt || 1 / 60, 0.1), len = Math.max(1, o.length || 20), sc = o.scale || 1;
+      beamFwd.copy(dir).normalize();
+      beamU.set(0, 1, 0);
+      if (Math.abs(beamFwd.y) > 0.95) beamU.set(1, 0, 0);
+      beamR.crossVectors(beamFwd, beamU).normalize();
+      beamU.crossVectors(beamR, beamFwd).normalize();
+      beamIdle = 0;
+      beamT += dt;
+      const shade = m(origin, null), flick = 0.85 + 0.15 * Math.sin(beamT * 73 + 1.3);
+      beamAcc[0] += dt * 150; beamAcc[1] += dt * 55; beamAcc[2] += dt * 20;
+      // (1) tia lửa điện tạt ra khỏi thân beam
+      while (beamAcc[0] >= 1) {
+        beamAcc[0] -= 1;
+        const sDist = len * ht(), a = ht() * 6.283, ca = Math.cos(a), sa = Math.sin(a);
+        beamV.set(beamR.x * ca + beamU.x * sa, beamR.y * ca + beamU.y * sa, beamR.z * ca + beamU.z * sa);
+        const out = Ze(10, 34) * sc * 0.6, along = Ze(-6, 14);
+        beamSpark(origin.x + beamFwd.x * sDist + beamV.x * 0.5 * sc, origin.y + beamFwd.y * sDist + beamV.y * 0.5 * sc,
+          origin.z + beamFwd.z * sDist + beamV.z * 0.5 * sc,
+          beamV.x * out + beamFwd.x * along, beamV.y * out + beamFwd.y * along + 1.5, beamV.z * out + beamFwd.z * along,
+          Ze(0.18, 0.5), 0.07 * sc, 3.5, 4.6, 1.8, 7.4);
+      }
+      // (2) chấm sáng trôi dọc beam
+      while (beamAcc[1] >= 1) {
+        beamAcc[1] -= 1;
+        const sDist = len * ht(), a = ht() * 6.283;
+        const id = c.emit(origin.x + beamFwd.x * sDist + (beamR.x * Math.cos(a) + beamU.x * Math.sin(a)) * 0.9 * sc,
+          origin.y + beamFwd.y * sDist + (beamR.y * Math.cos(a) + beamU.y * Math.sin(a)) * 0.9 * sc,
+          origin.z + beamFwd.z * sDist + (beamR.z * Math.cos(a) + beamU.z * Math.sin(a)) * 0.9 * sc,
+          beamFwd.x * 18, beamFwd.y * 18, beamFwd.z * 18, Ze(0.12, 0.26), 1.1 * sc, 0.2 * sc);
+        if (id >= 0) {
+          c.frame[id] = V1; c.ramp[id] = 4; c.r[id] = 2.4; c.g[id] = 0.7; c.b[id] = 4.8;
+          c.drag[id] = 0.5; c.fin[id] = 0.1; c.fout[id] = 0.5;
+        }
+      }
+      // (3) flare ở miệng
+      w(origin.x + beamFwd.x * 0.4, origin.y + beamFwd.y * 0.4, origin.z + beamFwd.z * 0.4,
+        0.07, 2.6 * sc, 4.2 * sc, 5.8 * flick, 2.2 * flick, 9 * flick, oo);
+      // (4) đèn động: một ở giữa beam, một ở điểm chạm
+      const pool = y();
+      for (let k = 0; k < 2; k++) {
+        if (k === 1 && !o.hit) continue;
+        if (!beamLights[k]) beamLights[k] = pool && pool.acquire ? pool.acquire() : null;
+        const bl = beamLights[k];
+        if (!bl) continue;
+        const L = bl.light;
+        L.color.setRGB(0.62 + 0.1 * Math.sin(beamT * 41 + k), 0.28, 1);
+        if (k === 0) {
+          const d = Math.min(len * 0.45, 16);
+          L.position.set(origin.x + beamFwd.x * d, origin.y + beamFwd.y * d, origin.z + beamFwd.z * d);
+          L.distance = 46; L.intensity = 260 * flick;
+        } else {
+          L.position.set(o.hit.x, o.hit.y + 0.6, o.hit.z);
+          L.distance = 34; L.intensity = 380 * (0.75 + 0.25 * Math.sin(beamT * 53));
+        }
+      }
+      // (5) chỗ chạm
+      if (o.hit) {
+        beamHit.copy(o.hit);
+        if (o.normal && o.normal.isVector3) beamN.copy(o.normal); else beamN.set(0, 1, 0);
+        beamAcc[3] += dt * 190; beamAcc[4] += dt * 26; beamAcc[5] += dt * 9;
+        while (beamAcc[3] >= 1) {                                   // tia lửa văng
+          beamAcc[3] -= 1;
+          ro(beamN, 1.15, beamP);
+          const sp = Ze(7, 30) * sc * 0.65;
+          beamSpark(beamHit.x + beamN.x * 0.3, beamHit.y + beamN.y * 0.3, beamHit.z + beamN.z * 0.3,
+            beamP.x * sp, beamP.y * sp + 2, beamP.z * sp, Ze(0.35, 0.95), 0.08 * sc, 9.81, 5.4, 2, 7.6);
+        }
+        while (beamAcc[4] >= 1) {                                   // cầu sáng nổ tại điểm chạm
+          beamAcc[4] -= 1;
+          ro(beamN, 0.9, beamP);
+          const sp = Ze(1, 5);
+          beamLobe(beamHit.x + beamN.x * 0.4, beamHit.y + beamN.y * 0.4, beamHit.z + beamN.z * 0.4,
+            beamP.x * sp, beamP.y * sp + 1, beamP.z * sp, Ze(0.35, 0.7), 1.4 * sc, 3.6 * sc,
+            ht() < 0.4 ? 5.2 : 2.4, ht() < 0.4 ? 2.2 : 0.8, ht() < 0.4 ? 9 : 5.2, 1.6, shade);
+        }
+        while (beamAcc[5] >= 1) {                                   // khói đen cháy xém bốc lên
+          beamAcc[5] -= 1;
+          const g = Ze(0.04, 0.08);
+          _(beamHit.x + beamN.x * 0.5, beamHit.y + beamN.y * 0.5, beamHit.z + beamN.z * 0.5,
+            (ht() - 0.5) * 3, Ze(2, 5), (ht() - 0.5) * 3, Ze(1.6, 2.6), 1.2 * sc, Ze(3.6, 5.4) * sc, g, g * 0.95, g * 0.9, 0.5, shade, 1.1, 0.9, 1, -1);
+        }
+        if ((beamScorch -= dt) <= 0) { beamScorch = 0.22; p.add(beamHit, beamN, "scorch", 4.4); }
+      }
+    }
     function ue(ee) {
       (ee > 0 || (ee = 0), (v += ee), re(ee));
       jetIdle += ee;
       if (jetLight && jetIdle > 0.12) { jetLight.release(); jetLight = null; jetAcc.fill(0); }
+      beamIdle += ee;
+      if (beamIdle > 0.12) { for (let k = 0; k < 2; k++) if (beamLights[k]) { beamLights[k].release(); beamLights[k] = null; } beamAcc.fill(0); }
       let B = i.camera ? i.camera.position : Es.set(0, 0, 0);
       (r.begin(),
         l.update(ee, r, B, t, v),
@@ -3566,10 +3680,12 @@ void main() {
       (l.clear(), c.clear(), u.clear(), h.clear(), f.clear(), p.clear());
       for (let ee of ie) ee.active && ee.stop();
       jetLight && (jetLight.release(), (jetLight = null));
+      for (let k = 0; k < 2; k++) beamLights[k] && (beamLights[k].release(), (beamLights[k] = null));
       (r.begin(), r.end(), a.begin(), a.end());
     }
     return {
       flameJet,
+      beamJet,
       update: ue,
       clear: me,
       muzzleFlash: j,
@@ -4920,6 +5036,22 @@ void main() {
       new Int16Array(assetBytes(spinoAudioSamples[name][variant])), value => value / 32768);
   }
 
+  const sentryShotAudio = /*@inline:data/sentry-shot-audio.json*/ null;
+
+  const mechaAudio = /*@inline:data/mecha-audio.json*/ null;
+  function mechaSample(name) {
+    return () => Float32Array.from(new Int16Array(assetBytes(mechaAudio[name])), sample => sample / 32768);
+  }
+
+  const handlerAudio = /*@inline:data/handler-audio.json*/ null;
+
+  const playerAkAudio = /*@inline:data/player-ak-audio.json*/ null;
+
+  function playerAkSample(name) {
+    return (rate, random, variant) => Float32Array.from(
+      new Int16Array(assetBytes(playerAkAudio[name][variant])), value => value / 32768);
+  }
+
   function gigaFireNoise(rate, random) {
     const sound = Qn(rate, 4, random);
     const hiss = Qn(rate, 4, random);
@@ -5904,16 +6036,30 @@ void main() {
     Xn = 32e3,
     pl = 22050,
     Go = {
+      ankylo_spawn: { gen: mechaSample("ankylo_spawn"), n: 1, sr: 24000, peak: .9, bus: "world", max: 3, pri: 8, ref: 21, boot: true },
+      ankylo_small_spawn: { gen: mechaSample("ankylo_small_spawn"), n: 1, sr: 24000, peak: .8, bus: "world", max: 4, pri: 6, ref: 12, boot: true },
+      ankylo_death: { gen: mechaSample("ankylo_death"), n: 1, sr: 24000, peak: .94, bus: "world", max: 3, pri: 9, ref: 21, boot: true },
+      raptor_spawn: { gen: mechaSample("raptor_spawn"), n: 1, sr: 24000, peak: .86, bus: "world", max: 3, pri: 7, ref: 17, boot: true },
+      raptor_death: { gen: mechaSample("raptor_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 3, pri: 8, ref: 17, boot: true },
+      sentry_shot: {
+        gen: () => Float32Array.from(new Int16Array(assetBytes(sentryShotAudio)), sample => sample / 32768),
+        n: 1, sr: Xn, peak: .9, bus: "world", max: 4, pri: 7, ref: 7, boot: true,
+      },
       rifle_shot: {
-        gen: KR,
-        n: 4,
-        sr: ki,
+        gen: playerAkSample("rifle_shot"),
+        n: 3,
+        sr: Xn,
         peak: 0.97,
         bus: "near",
         max: 5,
         pri: 9,
         boot: 1,
       },
+      player_magin: { gen: playerAkSample("player_magin"), n: 1, sr: Xn, peak: .72, bus: "near", max: 1, pri: 8, boot: true },
+      player_jump_grunt: { gen: playerAkSample("player_jump_grunt"), n: 2, sr: Xn, peak: .85, bus: "dry", max: 1, pri: 8, boot: true },
+      player_pain_grunt: { gen: playerAkSample("player_pain_grunt"), n: 3, sr: Xn, peak: .9, bus: "dry", max: 1, pri: 9, boot: true },
+      player_sprint_breath: { gen: playerAkSample("player_sprint_breath"), n: 1, sr: Xn, peak: .7, bus: "dry", loop: true, boot: true },
+      player_regen_breath: { gen: playerAkSample("player_regen_breath"), n: 1, sr: Xn, peak: .7, bus: "dry", loop: true, boot: true },
       rifle_tail_out: {
         gen: QR,
         n: 2,
@@ -6141,7 +6287,7 @@ void main() {
       spino_beam_loop: { gen: spinoSample("spino_beam_loop"), n: 1, sr: 24000, peak: .87, bus: "world", loop: true, ref: 18, boot: true },
       spino_beam_tail: { gen: spinoSample("spino_beam_tail"), n: 1, sr: 24000, peak: .83, bus: "world", max: 1, pri: 8, ref: 16, boot: true },
       giga_step: { gen: gigaSample("giga_step"), n: 4, sr: 24000, peak: .83, bus: "world", max: 3, pri: 5, ref: 9, boot: true },
-      giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
+      giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 3, pri: 9, ref: 15, boot: true },
       giga_death: { gen: gigaSample("giga_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
       giga_foley: { gen: gigaSample("giga_foley"), n: 1, sr: 24000, peak: .65, bus: "world", loop: true, ref: 6, boot: true },
       giga_fire: { gen: gigaFireNoise, n: 1, sr: 24000, peak: .72, bus: "world", loop: true, ref: 10, boot: true },
@@ -6702,6 +6848,53 @@ void main() {
       b("ir_shed", 0, (te) => {
         C.buffer = te;
       }));
+    const handlerBuffers = new Map();
+    const handlerGain = m(1.15);
+    handlerGain.connect(H.dry);
+    let handlerVoice = null;
+
+    function stopHandlerSource() {
+      const source = handlerVoice?.source;
+      if (!source) return;
+      handlerVoice.source = null;
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    }
+
+    function stopHandlerVoice() {
+      stopHandlerSource();
+      handlerVoice = null;
+    }
+
+    function resumeHandlerVoice() {
+      if (!handlerVoice || handlerVoice.source || !o()) return;
+      const voice = handlerVoice;
+      const source = e.createBufferSource();
+      voice.source = source;
+      voice.started = e.currentTime;
+      source.buffer = voice.buffer;
+      source.connect(handlerGain);
+      source.onended = () => {
+        source.disconnect();
+        if (handlerVoice === voice) handlerVoice = null;
+      };
+      source.start(0, voice.offset);
+    }
+
+    function playHandlerVoice(key) {
+      stopHandlerVoice();
+      if (!o() || !handlerAudio[key]) return;
+      if (!handlerBuffers.has(key)) {
+        const samples = new Int16Array(assetBytes(handlerAudio[key].pcm));
+        const buffer = e.createBuffer(1, samples.length, 24000);
+        buffer.getChannelData(0).set(Float32Array.from(samples, sample => sample / 32768));
+        handlerBuffers.set(key, buffer);
+      }
+      handlerVoice = { buffer: handlerBuffers.get(key), offset: 0, source: null };
+      resumeHandlerVoice();
+    }
+
     function ie(te, he, pe, ge) {
       te.positionX
         ? ((te.positionX.value = he),
@@ -6757,11 +6950,9 @@ void main() {
       fe = 0,
       le = -9,
       R = -9,
-      I = 0,
       se = -9,
       ae = -9,
       k = -9,
-      ce = -9,
       ve = -9,
       _e = -9,
       Te = -9,
@@ -7203,9 +7394,15 @@ void main() {
           }
         });
     };
+    let lastPainGrunt = -Infinity, breathName = null, breathLoop = null;
+    function setPlayerBreath(name) {
+      if (breathName === name) return;
+      breathLoop?.stop(.16);
+      breathName = name;
+      breathLoop = name ? Be(name, { bus: "dry", gain: .58, fade: 8, offset: 0 }) : null;
+    }
     (ln("weapon:fire", () => {
-      ((I = (I + 1) & 3),
-        ze("rifle_shot", { variant: I, gain: 1, jitter: 0.012 }));
+      ze("rifle_shot", { variant: Math.floor(s() * 3), gain: 1, jitter: .012 });
       let te = e.currentTime;
       ((le = te),
         te - R > 0.28 && fo(1),
@@ -7217,24 +7414,10 @@ void main() {
         te.phase === "magout"
           ? ze("reload_magout")
           : te.phase === "magin"
-            ? ze("reload_magin")
-            : te.phase === "bolt"
-              ? ze("reload_bolt")
-              : te.phase === "start" && ze("jump", { gain: 0.5, pitch: 1.3 });
+            ? ze("player_magin")
+            : te.phase === "start" && ze("jump", { gain: 0.5, pitch: 1.3 });
       }),
       ln("weapon:melee", () => ze("jump", { gain: 0.9, pitch: 1.2 })),
-      ln("shell:bounce", (te) => {
-        let he = e.currentTime;
-        he - ce < 0.04 ||
-          ((ce = he),
-          te.surface === "water"
-            ? ze("impact_water", { pos: Hn(te.pos), gain: 0.25, pitch: 1.7 })
-            : ze("shell_bounce", {
-                pos: Hn(te.pos),
-                gain: te.surface === "metal" ? 1 : 0.8,
-                pitch: te.surface === "metal" ? 1.12 : 1,
-              }));
-      }),
       ln("impact", (te) => {
         let he = e.currentTime;
         if (he - se < 0.022) return;
@@ -7309,7 +7492,10 @@ void main() {
           jitter: 0.06,
         });
       }),
-      ln("player:jump", () => ze("jump", { gain: 0.8 })),
+      ln("player:jump", () => {
+        ze("jump", { gain: .48 });
+        ze("player_jump_grunt", { variant: Math.floor(s() * 2), gain: .92 });
+      }),
       ln("player:land", (te) => {
         let he = pi(0.35 + (Math.abs(te.speed) || 4) / 10, 0.35, 1);
         (ze("land", { gain: he }),
@@ -7319,7 +7505,11 @@ void main() {
       ln("player:hit", (te) => {
         let he = +te.amount || 10,
           pe = e.currentTime;
-        (ze("hurt", { gain: pi(0.5 + he / 40, 0.5, 1), jitter: 0.08 }),
+        if (pe - lastPainGrunt >= 5 &&
+            ze("player_pain_grunt", { variant: Math.floor(s() * 3), gain: .98, jitter: .015 })) {
+          lastPainGrunt = pe;
+        }
+        (
           he >= 6 &&
             pe - k > 1.8 &&
             ((k = pe),
@@ -7332,7 +7522,20 @@ void main() {
           ((_e = e.currentTime), ze("death", { gain: 1, jitter: 0 })),
           (Z = 1));
       }),
-      ln("enemy:spawn", (te) => ho(te.enemy)),
+      ln("enemy:spawn", ({ enemy }) => {
+        ho(enemy);
+        if (enemy.type === "raptor") ze("raptor_spawn", { pos: enemy.pos, gain: 1.15 });
+        if (enemy.type === "hound") {
+          const small = enemy.size === 1;
+          ze(small ? "ankylo_small_spawn" : "ankylo_spawn", {
+            pos: enemy.pos, gain: small ? .72 : 1.3,
+            delay: small ? s() * .22 : 0,
+          });
+        }
+      }),
+      ln("raptor:charge", ({ pos }) => ze("telegraph", {
+        pos, variant: 1, pitch: .58, gain: .9, ref: 13, jitter: 0,
+      })),
       ln("enemy:alert", (te) => {
         Y = Math.max(Y, 0.6);
         let he = e.currentTime;
@@ -7400,18 +7603,26 @@ void main() {
           pe = te.type || (he && he.type),
           ge = Hn(te.pos) || (he && Hn(he.pos));
         if (pe === "giganotosaurus" || pe === "spinosaurus") return;
-        (he && Rs(he),
-          ze(pe === "hound" ? "hound_die" : "gull_die", {
+        if (he) Rs(he);
+        if (pe === "raptor") {
+          ze("raptor_death", { pos: ge, gain: 1.15, jitter: 0 });
+          return;
+        }
+        if (pe === "hound" && i.campaign) {
+          if (he.size !== 1) ze("ankylo_death", { pos: ge, gain: 1.25, jitter: 0 });
+          return;
+        }
+        ze(pe === "hound" ? "hound_die" : "gull_die", {
             pos: ge,
             gain: 1,
             jitter: 0.05,
-          }));
+          });
       }),
       ln("explosion", (te) => {
         let he = pi(+te.size || 1, 0.3, 3),
           pe = Hn(te.pos);
         if (
-          (ze("explosion", {
+          (!te.customAudio && ze("explosion", {
             pos: pe,
             gain: pi(0.6 + 0.25 * he, 0.5, 1.1),
             pitch: pi(1.12 - 0.1 * he, 0.8, 1.15),
@@ -7535,6 +7746,7 @@ void main() {
       ln("game:state", (te) => {
         let he = ee;
         if (((ee = te.state || ee), ee === "playing" && he !== "paused")) {
+          lastPainGrunt = -Infinity;
           ((Y = 0), (Z = 0), ya());
           for (let pe of [...pn.keys()]) pe.alive === !1 && Rs(pe);
         }
@@ -7564,6 +7776,12 @@ void main() {
     }
     function lu(te) {
       te = Math.min(Math.max(+te || 0, 0), 0.25);
+      const player = i.player;
+      setPlayerBreath(ee === "playing" && player?.alive && player.enabled
+        ? player.sprinting && player.speed > 2
+          ? "player_sprint_breath"
+          : player.regenerating ? "player_regen_breath" : null
+        : null);
       let he = i.camera,
         pe = e.listener;
       if (he && he.matrixWorld) {
@@ -7809,6 +8027,8 @@ void main() {
         ctx: e,
         resume: yr,
         play: ze,
+        playHandlerVoice,
+        stopHandlerVoice,
         loop: Be,
         update: lu,
         ready: x,
@@ -7826,6 +8046,12 @@ void main() {
         },
         setPaused(te) {
           ue = !!te;
+          if (!ue) resumeHandlerVoice();
+          else if (handlerVoice?.source) {
+            handlerVoice.offset += e.currentTime - handlerVoice.started;
+            if (handlerVoice.offset >= handlerVoice.buffer.duration) stopHandlerVoice();
+            else stopHandlerSource();
+          }
         },
         names: Object.keys(Go).filter((te) => !Go[te].ir),
         get intensity() {
@@ -7872,6 +8098,10 @@ void main() {
       ControlRight: "crouch",
       KeyR: "reload",
       KeyE: "interact",
+      Digit1: "deploySentry",
+      Numpad1: "deploySentry",
+      Digit2: "secureTransport",
+      Numpad2: "secureTransport",
       KeyF: "melee",
       KeyV: "melee",
       Escape: "pause",
@@ -8430,6 +8660,7 @@ void main() {
         pitch: 0,
         health: 100,
         maxHealth: 100,
+        regenerating: false,
         alive: !0,
         onGround: !0,
         sprinting: !1,
@@ -8451,6 +8682,7 @@ void main() {
             (C.pitch = 0),
             C.vel.set(0, 0, 0),
             (C.health = C.maxHealth),
+            (C.regenerating = false),
             (C.alive = !0),
             (C.onGround = !0),
             (C.sprinting = !1),
@@ -8487,6 +8719,7 @@ void main() {
             !(F > 0) ||
             ((C.health = Math.max(0, C.health - F)),
             (E = 0),
+            (C.regenerating = false),
             (w = Math.min(1, w + 0.35 + F / 40)),
             C.addShake(0.22 + F / 70),
             i.events.emit("player:hit", { amount: F, fromPos: X }),
@@ -8715,9 +8948,9 @@ void main() {
       let k = C.vel.x * Y - C.vel.z * V;
       ((v = kn(v, (-k / Mt.sprint) * Mt.rollStrafe * bi(1, 0.4, C.ads), 8, F)),
         (E += F),
-        E > Mt.regenDelay &&
-          C.health < C.maxHealth &&
-          (C.health = Math.min(C.maxHealth, C.health + Mt.regenRate * F)),
+        (C.regenerating = F > 0 && E > Mt.regenDelay && C.health < C.maxHealth),
+        C.regenerating && (C.health = Math.min(C.maxHealth, C.health + Mt.regenRate * F)),
+        (C.regenerating = C.regenerating && C.health < C.maxHealth),
         K(F),
         ie(F));
     }

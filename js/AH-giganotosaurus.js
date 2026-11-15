@@ -72,11 +72,11 @@
       return { x: Math.cos(angle) * spread, y: Math.sin(angle) * spread, phase: index / flameCount };
     });
 
-    let state, cooldown, repath, path, waypoint, action;
+    let state, cooldown, repath, path, waypoint, action, corpseTime, corpseSeconds, protectIntro;
     const enemy = {
       type: "giganotosaurus", pos: model.position, alive: false, hp: 0, maxHp: 0,
       damage(amount, impact) {
-        if (!this.alive || !(amount > 0)) return false;
+        if (!this.alive || !(amount > 0) || (state === "intro" && protectIntro)) return false;
         this.hp = Math.max(0, this.hp - amount);
         game.events.emit("enemy:hit", { enemy: this, pos: impact, damage: amount });
         if (this.hp) return false;
@@ -193,6 +193,12 @@
 
     return {
       reset,
+      get available() { return state === "ready" || (state === "done" && !model.visible); },
+      get invulnerable() { return state === "intro" && protectIntro; },
+      get alive() { return enemy.alive; },
+      get sentryTarget() {
+        return enemy.alive && !(state === "intro" && protectIntro) ? { enemy: enemy, aimAt: out => spheres[0].bone.getWorldPosition(out) } : null;
+      },
       get started() { return state !== "ready"; },
       get purple() { return purple; },
       get done() { return state === "done"; },
@@ -201,8 +207,11 @@
       get windingUp() { return state === "roar" && action.time < flameStart; },
       get health() { return enemy.hp; },
       get maxHealth() { return enemy.maxHp; },
-      start(position, health, { purpleBoss = false } = {}) {
+      start(position, health, { purpleBoss = false, introRoar = false, invulnerableIntro = false, corpse = Infinity } = {}) {
         purple = purpleBoss;
+        protectIntro = invulnerableIntro;
+        corpseSeconds = corpse;
+        corpseTime = 0;
         model.scale.setScalar(normalSize * (purple && !reinforcement ? 2 : 1));
         mesh.material.map = purple ? purpleMap : originalMap;
         flame.visible = false;
@@ -210,15 +219,16 @@
         model.rotation.y = Math.atan2(game.player.pos.x - position.x, game.player.pos.z - position.z);
         model.visible = enemy.alive = true;
         enemy.hp = enemy.maxHp = health;
-        state = "walk";
+        state = introRoar ? "intro" : "walk";
         cooldown = 1;
         path = [];
         repath = waypoint = 0;
-        play("Walk");
+        play(introRoar ? "Roar" : "Walk");
+        if (introRoar) game.events.emit("giga:roar", { pos: mouth.getWorldPosition(origin) });
         game.events.emit("enemy:spawn", { enemy });
       },
       raycast(start, direction, maxDistance) {
-        if (!enemy.alive) return null;
+        if (!enemy.alive || (state === "intro" && protectIntro)) return null;
         ray.set(start, direction);
         let closest = null;
         for (const { bone, radius, sphere } of spheres) {
@@ -234,10 +244,21 @@
       },
       update(dt) {
         if (!model.visible) return;
+        if (state === "done") {
+          if ((corpseTime += dt) >= corpseSeconds) model.visible = false;
+          return;
+        }
         const previousTime = action.time;
         if (state !== "walk") mixer.update(dt);
         if (state === "dying") {
           if (action.time >= action.getClip().duration - .001) state = "done";
+          return;
+        }
+        if (state === "intro") {
+          if (action.time >= action.getClip().duration - .001) {
+            state = "walk";
+            play("Walk");
+          }
           return;
         }
         if (state === "bite") {

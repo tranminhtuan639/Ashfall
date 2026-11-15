@@ -144,19 +144,21 @@
         (await Nr("Dựng khán đài", 0.34),
         await r("level", "level", () => buildColosseum(t), !0),
         await r("defense", "defense", () => setupRaptorDefense(t), !0),
+        await r("sentryGun", "sentryGun", () => loadDefenseMesh(sentryGunData), !0),
+        await r("sentryMount", "sentryMount", () => loadDefenseMesh(sentryMountData), !0),
         await r("giga", "giga", async () => {
           const assets = Promise.all([
             loadDefenseMesh(giganotosaurusData, true),
             akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
           ]);
-          const options = { assets, reinforcement: true };
-          const [giga, left, right, spino] = await Promise.all([
-            setupGiganotosaurus(t, { assets }), setupGiganotosaurus(t, options),
-            setupGiganotosaurus(t, options), setupSpinosaurus(t),
+          const [gigas, spino] = await Promise.all([
+            Promise.all(Array.from({ length: 11 }, (_, index) =>
+              setupGiganotosaurus(t, { assets, reinforcement: index >= 5 && index < 9 }))),
+            setupSpinosaurus(t),
           ]);
           t.spino = spino;
-          t.gigaReinforcements = [left, right];
-          return giga;
+          t.gigas = gigas;
+          return gigas[0];
         }, !0),
         await Nr("Chuẩn bị sân", 0.5),
         await r("backdrop", "backdrop", () => dr.backdrop()),
