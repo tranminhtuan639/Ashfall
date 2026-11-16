@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   window.__fatal = null;
   window.__errors = [];
   var vM = document.getElementById("boot"),
@@ -186,7 +187,7 @@
         await Nr("Preparing controls", 0.82),
         await r("enemies", "enemies", () => Em(t)),
         await r("hud", "hud", () => hM(t)),
-        (t.game = mM(t)));
+        (t.game = i.lan === "1" ? setupArenaLan(t) : mM(t)));
     }
     await Nr("Waiting for first light", 0.92);
     try {
@@ -270,7 +271,7 @@
                   "[loop] showcase update threw: " + ((v && v.stack) || v),
                 ));
             }
-        } else d && (u("player", p), u("weapon", p), u("enemies", p));
+        } else d && (u("player", p), u("weapon", p), i.lan !== "1" && u("enemies", p));
         if (
           t.weapon &&
           t.weapon.setWetness &&

@@ -1,5 +1,7 @@
-  function createArenaCampaign(game, finish, failTransport) {
-    const { defense, spino, gigas, level, player, hud } = game;
+// LAN_CAMPAIGN_FULL
+// LAN_CAMPAIGN_STAGE_ONE
+  function createArenaCampaign(game, finish, failTransport, coOp) {
+    const { defense, spino, gigas = [], level, player, hud } = game;
     const { raptors, transport } = defense;
     const units = [...raptors, ...gigas, spino];
     const { A, B } = level.arena;
@@ -57,6 +59,7 @@
     };
     function radio(key) {
       const clip = key === "purple" ? gigaDuoVoice : handlerAudio[key];
+      coOp?.radio(lines[key], (clip?.seconds ?? 4.5) + .25, clip ? key : null);
       if (key === "firstCall") hud.radio(lines[key], 5);
       else hud.radio(lines[key], (clip?.seconds ?? 4.5) + .25, clip ? key : null);
     }
@@ -131,7 +134,7 @@
       if (spec.kind === "raptor") {
         const unit = raptors.find(raptor => !raptor.started || raptor.done);
         if (!unit) return false;
-        unit.start(pos, { ...spec, hp });
+        unit.start(pos, { ...spec, hp: Math.max(1, Math.round(spec.hp * (game.runDifficulty?.enemyHealth ?? 1))) });
       } else if (spec.kind === "ankylosaurus") {
         const enemy = game.enemies.spawn("ankylosaurus", pos, { size: spec.size, hp,
           state: "alert", target: player.pos, damageScale: spec.size === 1 ? .2 : 1,
@@ -178,7 +181,9 @@
       if (!spec) return;
       ankyloAlive.delete(enemy);
       const origin = enemy.pos.clone();
-      game.fx?.explosion?.(turretPos || origin, spec.size === 1 ? .9 : 2.3, { customAudio: spec.size !== 1 });
+      const scale = spec.size === 1 ? .9 : 2.3;
+      game.fx?.explosion?.(turretPos || origin, scale, { customAudio: spec.size !== 1 });
+      coOp?.ankyloExplosion(turretPos || origin, scale, spec.size !== 1);
       for (let index = 0; index < (spec.count || 0); index++) {
         const angle = enemy.yaw + index * Math.PI * 2 / spec.count;
         pending.push({ kind: "ankylosaurus", size: 1, hp: spec.childHp, delay: .5,
@@ -194,6 +199,7 @@
       return "How Did We Get Here?";
     }
     function queueWave() {
+      if (wave === 0) coOp?.stageStarted(stage + 1);
       const specs = [...stages[stage][wave]];
       if (stage < 2) {
         for (let index = specs.length - 1; index > 0; index--) {
@@ -228,11 +234,12 @@
         }
       }
       if (extract) {
+        if (coOp?.extract()) { finish(); return false; }
         for (const unit of gigas) if (unit.started) unit.update(dt);
         defense.updateAmmoPickup();
         if (transport.nearby(player.pos)) {
           hud.setPrompt("[2] Extract", 0, "status");
-          if (game.input.pressed("secureTransport")) { finish(); return false; }
+          if (player.alive && game.input.pressed("secureTransport")) { finish(); return false; }
         }
         return true;
       }
@@ -256,12 +263,12 @@
         else index++;
       }
       for (const unit of units) {
-        if (!player.alive) return false;
+        if (!(coOp ? coOp.alive() : player.alive)) break;
         if (unit.started) unit.update(dt);
       }
-      if (!player.alive) return false;
+      if (!(coOp ? coOp.alive() : player.alive)) return false;
       if (stage === 0 && transport.health <= 0) { failTransport(); return false; }
-      if (summoned && spino.alive && !minionSlots.some(unit => unit.alive) &&
+      if (summoned && spino?.alive && !minionSlots.some(unit => unit.alive) &&
           !pending.some(spec => spec.reinforcement === "minion")) {
         spino.summonReinforcements(() => {
           const specs = coloredPair();
@@ -287,11 +294,12 @@
           ? { variant: "spino", left: fill, right: fill } : fill);
       }
       if (pending.length || ankyloAlive.size || raptors.some(unit => unit.alive) ||
-          gigas.some(unit => unit.alive) || (spino.started && (!summoned || !spino.done))) return true;
+          gigas.some(unit => unit.alive) || (spino?.started && (!summoned || !spino.done))) return true;
 
       if (stage === 2 && wave === 1 && !duo.every(unit => unit.done)) return true;
       if (stage === 3 && wave === 1) {
         extract = true;
+        coOp?.readyToExtract();
         game.events.emit("arena:music", { track: "ambient" });
         transport.setReady(true);
         hud.setObjective("Board the transport. Press to extract.");

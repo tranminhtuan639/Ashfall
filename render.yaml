@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ashfall-coop
+    runtime: python
+    plan: free
+    numInstances: 1
+        buildCommand: python -m zipfile -e index.zip dist && test -s dist/index.html && python -m py_compile ashfall_coop_server.py
+    startCommand: python ashfall_coop_server.py
+    healthCheckPath: /healthz

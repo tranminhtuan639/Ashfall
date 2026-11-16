@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   var ex = {};
   br(ex, { TUNE: () => Ui, create: () => Em, showcase: () => VC });
   var iu = class {
@@ -1006,6 +1007,16 @@
           }
           return hit;
         },
+        _lanSnapshot() {
+          return [m.id, m.pos.toArray(), m.size, m.yaw, m.speed, m.tyaw, m.tpitch, m.hp];
+        },
+        _lanApply([, pos, size, yaw, speed, tyaw, pitch, hp], dt) {
+          m.pos.fromArray(pos);
+          m.yaw = yaw;
+          a.group.rotation.y = yaw;
+          m.hp = hp;
+          visual.update(dt, speed, tyaw, pitch, false, 0, () => {});
+        },
         _update(T) {
           m.alive ? S(T) : U(T);
         },
@@ -1064,7 +1075,7 @@
       return best || escape || (distance > preferred ? nav.findPath(m.pos, player.pos) : null) || [];
     }
     function S(dt) {
-      const player = s.player;
+      const player = s.lan?.target(m.pos) || s.player;
       const distance = player ? Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z) : Infinity;
       const small = m.size === 1;
       const near = small ? 6 : 10, far = small ? 15 : 22;
@@ -1150,7 +1161,7 @@
         Po.normalize());
       const wall = s.physics.raycast(m.muzzle, Po, 28);
       const j = s.level?.raycastArena?.(m.muzzle, Po, wall?.dist ?? 28) || wall;
-      const Q = s.combat.enemyShot(m.muzzle, Po, {
+      const Q = s.combat.enemyShot(m.muzzle, Po, { targetPlayer: T,
           damage: Math.max(0, Gt.shotDamage * m.damageScale - (m.size === 1 ? 0 : 1)),
           range: 28,
         })
@@ -1617,6 +1628,21 @@
             closest = unit?.raycast(T, D, closest?.dist ?? C) || closest;
           }
           return closest;
+        },
+        lanSnapshot() { return t.filter(unit => unit.alive).map(unit => unit._lanSnapshot()); },
+        lanApply(snapshot, dt) {
+          for (const unit of t.slice()) {
+            if (!snapshot.some(([id]) => id === unit.id)) h.retire(unit);
+          }
+          for (const data of snapshot) {
+            const [id, pos, size, yaw, , , , hp] = data;
+            let unit = t.find(enemy => enemy.id === id);
+            if (!unit) {
+              unit = U.spawn("ankylosaurus", new W().fromArray(pos), { size, yaw, hp, passive: true });
+              if (unit) unit.id = id;
+            }
+            unit?._lanApply(data, dt);
+          }
         },
         aliveCount() {
           let T = 0;

@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   // ==========================================================================
   //  SPINO LIGHTNING BEAM — hiệu ứng nhìn cho tia sét của Spinosaurus
   //
@@ -46,7 +47,13 @@
     float fbm(vec3 p){ float a = .5, s = 0.; for (int i = 0; i < 4; i++){ s += a * vnoise(p); p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= .5; } return s; }
   `;
 
-  function createSpinoBeamFx(game, yellow = false, boltsOnly = false) {
+  function createSpinoBeamFx(game, yellow = false, boltsOnly = false, replica = false) {
+    let lanId;
+    const sync = frame => {
+      if (replica || !game.lan) return;
+      lanId ??= game.lan.allocateBeam();
+      game.lan.beam(lanId, frame);
+    };
     const cfg = yellow ? SPINO_BEAM_YELLOW : SPINO_BEAM;
     const V3 = (a) => new lt.Vector3(a[0], a[1], a[2]);
     const glslColor = color => "vec3(" + color.map(value => value.toFixed(3)).join(",") + ")";
@@ -232,6 +239,7 @@
     function lookDir(mesh, from, dir) { mesh.position.copy(from); mesh.quaternion.setFromUnitVectors(Z, dir); }
 
     function hide() {
+      if (lanId != null) game.lan.beam(lanId, null);
       firing = false;
       for (const m of [core, plasma, glow, flareMouth, flareHit, hitDisc, ball, inflow, bolts, ...rings, ...ringMeshes]) m.visible = false;
       hideAllBolts();
@@ -240,6 +248,7 @@
 
     // ---- nạp: p = 0..1, aim = hướng từ miệng tới mục tiêu ----
     function charge(mouth, aim, p, dt) {
+      sync([yellow, boltsOnly, "charge", mouth.toArray(), aim.toArray(), p]);
       frameClock(dt);
       firing = false;
       for (const m of [core, plasma, glow, flareHit, hitDisc, ...rings]) m.visible = false;
@@ -287,6 +296,7 @@
 
     // ---- bắn: dir đã khoá, length theo raycast, hit = {point, normal, dist} hoặc null ----
     function fire(mouth, dir, length, hit, dt) {
+      sync([yellow, boltsOnly, "fire", mouth.toArray(), dir.toArray(), length, hit?.normal?.toArray()]);
       frameClock(dt);
       impactClock += dt;
       firing = true;
@@ -375,6 +385,7 @@
 
     const forkStarts = [new lt.Vector3(), new lt.Vector3()];
     function fan(mouth, arcs, dt) {
+      sync([yellow, boltsOnly, "fan", mouth.toArray(), arcs.map(arc => arc.end.toArray())]);
       bolts.visible = true;
       if (firing && (regen += dt) < .045) return;
       firing = true;

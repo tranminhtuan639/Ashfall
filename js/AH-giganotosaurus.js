@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   const giganotosaurusData = /*@inline:data/giganotosaurus.json*/ null;
 
   const gigaPurpleColor = /*@inline:data/giga-purple-color.json*/ null;
@@ -143,7 +144,10 @@
       },
     };
 
+    let lanClip, lanSerial = 0;
     function play(name) {
+      lanClip = name;
+      lanSerial++;
       activeRig.mixer.stopAllAction();
       activeRig = name === "Bite" ? biteRig : name === "Walk" ? walkRig : legacy;
       lightning?.hide();
@@ -221,7 +225,7 @@
         }
       }
 
-      const player = game.player;
+      const player = game.lan?.target(model.position) || game.player;
       target.copy(player.pos);
       target.y += .9;
       delta.subVectors(target, origin);
@@ -233,7 +237,7 @@
     }
 
     function bite() {
-      const player = game.player;
+      const player = game.lan?.target(model.position) || game.player;
       biteHead.getWorldPosition(origin).lerp(biteJaw.getWorldPosition(point), .4);
       const scale = giant ? 2 : 1;
       target.copy(player.pos);
@@ -263,6 +267,33 @@
 
     return {
       reset,
+
+      lanSnapshot() {
+        if (!model.visible) return null;
+        return [model.position.toArray(), model.rotation.y, state, enemy.hp,
+          lanClip, action?.time ?? 0, lanSerial, [purple ? 'purple' : yellow ? 'yellow' : 'normal', giant, enemy.maxHp]];
+      },
+      lanApply(snapshot) {
+        if (!snapshot) { if (model.visible) reset(); return; }
+        const [pos, yaw, nextState, hp, clip, time, serial, extra] = snapshot;
+        if (!model.visible || purple !== (extra[0] === "purple") ||
+            yellow !== (extra[0] === "yellow") || giant !== extra[1]) {
+          this.start(model.position.fromArray(pos), extra[2], { variant: extra[0], giant: extra[1], replica: true });
+          lanSerial = -1;
+        }
+        model.visible = true;
+        model.position.fromArray(pos);
+        model.rotation.y = yaw;
+        state = nextState;
+        enemy.hp = hp;
+        enemy.alive = hp > 0;
+        if (clip) {
+          if (lanClip !== clip || lanSerial !== serial) play(clip);
+          action.time = time;
+          activeRig.mixer.update(0);
+        }
+        lanSerial = serial;
+      },
       get available() { return state === "ready" || (state === "done" && !model.visible); },
       get invulnerable() { return state === "intro"; },
       get alive() { return enemy.alive; },
@@ -278,7 +309,7 @@
       get windingUp() { return state === "roar" && action.time < flameStart; },
       get health() { return enemy.hp; },
       get maxHealth() { return enemy.maxHp; },
-      start(position, health, { variant = "normal", giant: large = false, corpse = Infinity } = {}) {
+      start(position, health, { variant = "normal", giant: large = false, corpse = Infinity, replica = false } = {}) {
         purple = variant === "purple";
         yellow = variant === "yellow";
         giant = large;
@@ -300,6 +331,7 @@
         path = [];
         repath = waypoint = 0;
         play("Roar");
+        if (replica) return;
         game.events.emit("giga:roar", { pos: mouthAt() });
         game.events.emit("enemy:spawn", { enemy });
       },
@@ -365,7 +397,7 @@
         if (state !== "walk") return;
         cooldown -= dt;
         repath -= dt;
-        const player = game.player;
+        const player = game.lan?.target(model.position) || game.player;
         target.copy(player.pos);
         target.y += .9;
         delta.subVectors(target, model.position);

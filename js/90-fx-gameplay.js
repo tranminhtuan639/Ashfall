@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   var Sv = {};
   br(Sv, { create: () => Cf, showcase: () => JR });
   function yv(i) {
@@ -8590,11 +8591,11 @@ void main() {
           }
           return null;
         },
-        enemyShot(n, s, { damage: o = 6, range: r = 200 } = {}) {
+        enemyShot(n, s, { damage: o = 6, range: r = 200, targetPlayer } = {}) {
           const physicsHit = i.physics.raycast(n, s, r);
           const a = i.level?.raycastArena?.(n, s, physicsHit?.dist ?? r) || physicsHit;
           let l = a ? a.dist : r,
-            c = i.player;
+            c = targetPlayer || i.player;
           if (c && c.alive) {
             let u = nm.copy(c.pos);
             u.y += 1;

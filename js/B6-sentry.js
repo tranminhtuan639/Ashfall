@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_STAGE_ONE
   const sentryGunData = /*@inline:data/sentry-gun.json*/ null;
 
   const sentryMountData = /*@inline:data/sentry-mount.json*/ null;
@@ -32,8 +33,8 @@
       if (explode) game.fx?.explosion?.(sentry.base.position.clone().setY(sentry.base.position.y + .6), .75);
     }
 
-    function place() {
-      const { player, physics, level } = game;
+    function place(player = game.player) {
+      const { physics, level } = game;
       if (!player.onGround) return false;
       forward.copy(player.forward).setY(0).normalize();
       if (forward.lengthSq() < .01) return false;
@@ -53,6 +54,12 @@
       const distance = direction.length();
       if (wallDistance(eye, direction.normalize(), distance) < distance - .02) return false;
 
+      addSentry(position, forward, true);
+      return true;
+    }
+
+    let nextId = 0;
+    function addSentry(position, forward, authoritative, id = ++nextId) {
       const base = new lt.Group();
       const pivot = new lt.Group();
       const mount = game.sentryMount.clone();
@@ -76,10 +83,11 @@
       base.position.copy(position);
       base.scale.setScalar(scale);
       const limit = game.runDifficulty?.sentryLimit ?? 4;
-      if (sentries.length >= limit) remove(sentries.shift(), true);
+      if (authoritative && sentries.length >= limit) remove(sentries.shift(), true);
       game.scene.add(base);
-      sentries.push({ base, pivot, cooldown: .2, followUp: null });
-      return true;
+      const sentry = { id, base, pivot, forward: forward.clone(), cooldown: .2, followUp: null };
+      sentries.push(sentry);
+      return sentry;
     }
 
     function fire(sentry, candidates) {
@@ -105,6 +113,7 @@
         game.fx?.muzzleFlash?.(muzzle, direction, { scale: .65 });
         game.fx?.tracer?.(muzzle, hit.point, { trail: false, intensity: 10 });
         game.audio?.play?.("sentry_shot", { pos: muzzle, gain: .65 });
+        game.lan?.sentryShot?.(muzzle, hit.point);
         const killed = hit.enemy.damage(damage, hit.point, direction, "body") === true;
         game.events.emit("impact", { ...hit, from: "turret", dir: direction, killed, surface: "enemy" });
         return true;
@@ -113,6 +122,21 @@
     }
 
     return {
+      place,
+      lanSnapshot() {
+        return sentries.map(({ id, base, pivot, forward }) =>
+          [id, base.position.toArray(), forward.toArray(), pivot.quaternion.toArray()]);
+      },
+      lanApply(snapshot) {
+        for (let index = sentries.length - 1; index >= 0; index--) {
+          if (!snapshot.some(([id]) => id === sentries[index].id)) remove(sentries.splice(index, 1)[0], true);
+        }
+        for (const [id, pos, heading, pose] of snapshot) {
+          const sentry = sentries.find(sentry => sentry.id === id) ||
+            addSentry(position.fromArray(pos), forward.fromArray(heading), false, id);
+          sentry.pivot.quaternion.fromArray(pose);
+        }
+      },
       reset() {
         for (const sentry of sentries) remove(sentry, false);
         sentries.length = 0;
@@ -128,8 +152,8 @@
             out.copy(enemy.pos).y += enemy.type === "ankylosaurus" ? .49 * enemy.size : 0;
           },
         }));
-        for (const unit of [...game.defense.raptors, ...game.gigas, game.spino]) {
-          const target = unit.sentryTarget;
+        for (const unit of [...game.defense.raptors, ...(game.gigas || []), game.spino]) {
+          const target = unit?.sentryTarget;
           if (target) candidates.push(target);
         }
         for (const sentry of sentries) {

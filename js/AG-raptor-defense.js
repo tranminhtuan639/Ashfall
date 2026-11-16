@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_STAGE_ONE
   const tekRaptorData = /*@inline:data/tek-raptor.json*/ null;
   const supplyTruckData = /*@inline:data/supply-truck.json*/ null;
 
@@ -174,6 +175,7 @@
     function blast(customAudio = false) {
       game.fx?.explosion?.(raptor.pos.clone().add(new W(0, .7, 0)), 1.3, { customAudio });
     }
+    let spawnSerial = 0;
     return {
       get position() { return raptor.pos; },
       get alive() { return raptor.alive; },
@@ -191,6 +193,7 @@
       },
       start(spawn, { hp = 180, scale = 1, targetPlayer = false } = {}) {
         huntsPlayer = targetPlayer;
+        spawnSerial++;
         repath = 0;
         size = scale;
         model.scale.setScalar(9 * scale);
@@ -203,6 +206,25 @@
         play("Run");
         game.events.emit("enemy:spawn", { enemy: raptor });
       },
+      lanSnapshot() {
+        return { position: model.position.toArray(), yaw: model.rotation.y, phase: state, hp: raptor.hp, scale: size ?? 1, run: spawnSerial };
+      },
+      lanApply(snapshot) {
+        model.position.fromArray(snapshot.position);
+        model.rotation.y = snapshot.yaw;
+        raptor.hp = snapshot.hp;
+        raptor.alive = snapshot.phase !== "ready" && snapshot.phase !== "dying" && snapshot.phase !== "done";
+        model.scale.setScalar(9 * snapshot.scale);
+        model.visible = snapshot.phase !== "done" && snapshot.phase !== "ready";
+        if (state === snapshot.phase && spawnSerial === snapshot.run) return;
+        spawnSerial = snapshot.run;
+        state = snapshot.phase;
+        if (state === "run") play("Run");
+        else if (state === "charge") play("Beam Charge", chargeTime, true);
+        else if (state === "dying") play("Death", deathTime, true);
+        else if (state === "cooldown" || state === "done") blast();
+      },
+      lanAnimate(dt) { if (model.visible) mixer.update(dt); },
       raycast(origin, direction, maxDistance) {
         if (!raptor.alive) return null;
         body.radius = .76 * size;
@@ -218,7 +240,14 @@
         if (!model.visible) return;
         mixer.update(dt);
         if (state === "run") {
-          const target = huntsPlayer ? game.player.pos : transport.goal;
+          let target = huntsPlayer ? game.player.pos : transport.goal;
+          if (huntsPlayer && game.lan) {
+            const closest = game.lan.players().reduce((current, player) =>
+              player.alive && (!current || player.pos.distanceToSquared(raptor.pos) < current.pos.distanceToSquared(raptor.pos))
+                ? player : current, null);
+            target = closest?.pos;
+          }
+          if (!target) return;
           if ((repath -= dt) <= 0) {
             path = game.physics.nav.findPath(raptor.pos, target) || [];
             waypoint = 0;
@@ -245,14 +274,16 @@
         if (state === "charge") {
           blast();
           if (huntsPlayer) {
-            const player = game.player;
             const source = raptor.pos.clone().setY(.7);
-            const offset = player.pos.clone().add(new W(0, .9, 0)).sub(source);
-            const distance = offset.length();
-            if (distance > .001 && distance < 4 &&
-                !game.physics.raycast(source, offset.normalize(), distance) &&
-                !game.level.raycastArena?.(source, offset, distance)) {
-              player.damage(35, raptor.pos);
+            for (const player of game.lan?.players() || [game.player]) {
+              if (!player.alive) continue;
+              const offset = player.pos.clone().add(new W(0, .9, 0)).sub(source);
+              const distance = offset.length();
+              if (distance > .001 && distance < 4 &&
+                  !game.physics.raycast(source, offset.normalize(), distance) &&
+                  !game.level.raycastArena?.(source, offset, distance)) {
+                player.damage(35, raptor.pos);
+              }
             }
           } else transport.health = Math.max(0, transport.health - 25);
           state = "cooldown";

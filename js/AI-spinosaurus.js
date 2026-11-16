@@ -1,3 +1,4 @@
+// LAN_CAMPAIGN_FULL
   const spinosaurusData = /*@inline:data/spinosaurus.json*/ null;
 
   const spinoEyesArmsColor = /*@inline:data/spino-eyes-arms-color.json*/ null;
@@ -143,10 +144,13 @@
       roarVariant = 1 - roarVariant;
     }
 
+    let lanClip, lanSerial = 0;
     function play(name) {
       const nextRig = name === "Death" ? death : name === "Walk" ? walkRig : updated.actions.has(name) ? updated : legacy;
       const next = nextRig.actions.get(name);
       if (next === action && next.isRunning()) return;
+      lanClip = name;
+      lanSerial++;
       activeRig.mixer.stopAllAction();
       activeRig.rig.visible = false;
       activeRig = nextRig;
@@ -186,7 +190,7 @@
       if (depth > 0 && depth <= reach &&
           distance * distance - depth * depth <= (radius + depth * slope) ** 2 &&
           !cast(mouth, offset.normalize(), distance)) {
-        game.player.damage(damage * damageMultiplier * dt, mouth);
+        (game.lan?.target(model.position) || game.player).damage(damage * damageMultiplier * dt, mouth);
         return true;
       }
       return false;
@@ -242,6 +246,28 @@
     reset();
     return {
       reset,
+
+      lanSnapshot() {
+        if (!model.visible) return null;
+        return [model.position.toArray(), model.rotation.y, state, enemy.hp,
+          lanClip, action?.time ?? 0, lanSerial, null];
+      },
+      lanApply(snapshot) {
+        if (!snapshot) { if (model.visible) reset(); return; }
+        const [pos, yaw, nextState, hp, clip, time, serial, extra] = snapshot;
+        model.visible = true;
+        model.position.fromArray(pos);
+        model.rotation.y = yaw;
+        state = nextState;
+        enemy.hp = hp;
+        enemy.alive = hp > 0;
+        if (clip) {
+          if (lanClip !== clip || lanSerial !== serial) play(clip);
+          action.time = time;
+          activeRig.mixer.update(0);
+        }
+        lanSerial = serial;
+      },
       get beamFx() { return currentBeam(); },
       get started() { return state !== "ready"; },
       get done() { return state === "done"; },
@@ -300,7 +326,8 @@
         const previous = action.time;
         activeRig.mixer.update(dt);
         const finished = action.time >= action.getClip().duration - .001;
-        target.copy(game.player.pos).setY(game.player.pos.y + .95);
+        const player = game.lan?.target(model.position) || game.player;
+        target.copy(player.pos).setY(player.pos.y + .95);
         updateMouth();
         if (isSummoning()) {
           if (state === "intro") {
@@ -389,7 +416,7 @@
         }
 
         cooldown -= dt;
-        const distance = model.position.distanceTo(game.player.pos);
+        const distance = model.position.distanceTo(player.pos);
         const aimed = lookAtPlayer(dt);
         direction.subVectors(target, mouth);
         const clear = !cast(mouth, direction.clone().normalize(), direction.length());
@@ -407,7 +434,7 @@
         }
         repath -= dt;
         if (repath <= 0) {
-          path = game.physics.nav.findPath(model.position, game.player.pos) || [];
+          path = game.physics.nav.findPath(model.position, player.pos) || [];
           waypoint = 0;
           repath = .35;
         }
