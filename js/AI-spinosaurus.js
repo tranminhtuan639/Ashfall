@@ -120,6 +120,7 @@
     reset();
     return {
       reset,
+      beamFx,   // lộ ra để chụp thử / chỉnh hiệu ứng beam từ bên ngoài
       get started() { return state !== "ready"; },
       get done() { return state === "done"; },
       get alive() { return enemy.alive; },
@@ -178,6 +179,12 @@
         target.copy(game.player.pos).setY(game.player.pos.y + .95);
         updateMouth();
         if (isSummoning()) {
+          if (state === "intro") {
+            const musicStart = Math.max(0, action.getClip().duration - 3);
+            if (previous <= musicStart && action.time > musicStart) {
+              game.events.emit("arena:music", { track: "boss", gain: 1.15 });
+            }
+          }
           if (finished) {
             const onComplete = state === "intro" ? summon : afterRoar;
             state = "move";

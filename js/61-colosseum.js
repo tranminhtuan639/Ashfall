@@ -336,11 +336,12 @@
     // Arena cover, leaving the middle and the side-gate approaches open.
     const standingColumns = [[-17, 11, 4.2], [17, 13, 4.5], [19, -13, 4.1]];
     const newBrokenColumns = [[-22, -12, 4.1], [10, 17, 4.4], [25, 8, 4.3]];
+    const largeBrokenColumns = [[-33, 12, 4.2], [2, -15, 4.4], [36, -9, 4.3]];
     const intactColumns = [[-12, -17, 4.8], [12, -17, 4.8]];
     const fallenColumns = [[-9, 9, 4.7], [10, -8, 5.2]];
     const cover = new lt.Group();
 
-    function stoneCylinder(x, z, bottom, height, radius, topRadius, broken = false) {
+    function stoneCylinder(x, z, bottom, height, radius, topRadius, broken = false, scale = 1) {
       const geometry = new lt.CylinderGeometry(topRadius, radius, height, 14);
       if (broken) {
         const positions = geometry.attributes.position;
@@ -351,30 +352,60 @@
         }
         geometry.computeVertexNormals();
       }
+      geometry.scale(scale, scale, scale);
       const mesh = Qi(geometry, broken ? stone : stone2);
-      mesh.position.set(x, bottom + height / 2, z);
+      mesh.position.set(x, (bottom + height / 2) * scale, z);
       cover.add(mesh);
     }
 
-    function placeRoundColumn(x, z, height, broken) {
-      stoneCylinder(x, z, 0, .29, 1.28, 1.28);
-      stoneCylinder(x, z, .29, .19, 1.28, 1.09);
+    function placeRoundColumn(x, z, height, broken, scale = 1) {
+      stoneCylinder(x, z, 0, .29, 1.28, 1.28, false, scale);
+      stoneCylinder(x, z, .29, .19, 1.28, 1.09, false, scale);
       const shaftTop = broken ? height : height - .42;
-      stoneCylinder(x, z, .48, shaftTop - .48, 1.06, .96, broken);
+      stoneCylinder(x, z, .48, shaftTop - .48, 1.06, .96, broken, scale);
       if (!broken) {
-        stoneCylinder(x, z, shaftTop, .22, .96, 1.19);
-        stoneCylinder(x, z, height - .2, .2, 1.19, 1.19);
+        stoneCylinder(x, z, shaftTop, .22, .96, 1.19, false, scale);
+        stoneCylinder(x, z, height - .2, .2, 1.19, 1.19, false, scale);
       }
-      // Two intersecting boxes approximate the round footprint for movement and navigation.
+      addRoundColumnCollision(x, z, (broken ? height - .25 : height) * scale, scale);
+    }
+
+    function addRoundColumnCollision(x, z, height, scale) {
       const options = { playerOnly: true, tag: "round column" };
-      const colliderTop = broken ? height - .25 : height;
-      game.physics.addBox([x - 1.1, 0, z - .78], [x + 1.1, colliderTop, z + .78], options);
-      game.physics.addBox([x - .78, 0, z - 1.1], [x + .78, colliderTop, z + 1.1], options);
+      game.physics.addBox([x - 1.1 * scale, 0, z - .78 * scale], [x + 1.1 * scale, height, z + .78 * scale], options);
+      game.physics.addBox([x - .78 * scale, 0, z - 1.1 * scale], [x + .78 * scale, height, z + 1.1 * scale], options);
+    }
+
+    function placeFlutedRuin(x, z, height, angle) {
+      const scale = 2;
+      stoneCylinder(x, z, 0, .22, 1.28, 1.28, false, scale);
+      stoneCylinder(x, z, .22, .22, 1.28, 1.14, false, scale);
+      stoneCylinder(x, z, .44, .16, 1.14, 1.06, false, scale);
+      const shaftHeight = height - .6;
+      const geometry = new lt.CylinderGeometry(.94, 1.08, shaftHeight, 48, 4);
+      const vertices = geometry.attributes.position;
+      for (let index = 0; index < vertices.count; index++) {
+        const vx = vertices.getX(index), vz = vertices.getZ(index);
+        const theta = Math.atan2(vz, vx);
+        const radial = 1 - .12 * (.5 + .5 * Math.cos(theta * 12)) ** 2;
+        const y = vertices.getY(index) + shaftHeight / 2;
+        const breakProfile = Math.min(1, (y / shaftHeight) ** 4);
+        const notch = Math.max(0, 1 - Math.abs(Math.atan2(Math.sin(theta - .5), Math.cos(theta - .5))) / .58);
+        vertices.setXYZ(index, vx * radial, y - breakProfile * (.28 + vx * .28 + .7 * notch), vz * radial);
+      }
+      geometry.computeVertexNormals();
+      geometry.scale(scale, scale, scale);
+      const shaft = Qi(geometry, stone);
+      shaft.position.set(x, .6 * scale, z);
+      shaft.rotation.y = angle;
+      cover.add(shaft);
+      addRoundColumnCollision(x, z, (height - .68) * scale, scale);
     }
     for (const [x, z, height] of [...standingColumns, ...newBrokenColumns]) {
       placeRoundColumn(x, z, height, true);
     }
     for (const [x, z, height] of intactColumns) placeRoundColumn(x, z, height, false);
+    largeBrokenColumns.forEach(([x, z, height], index) => placeFlutedRuin(x, z, height, .3 + index * 1.2));
     for (const [x, z, length] of fallenColumns) {
       const mesh = Qi(Wi(length, 1.12, 1.45, .15), stone);
       mesh.position.set(x, .56, z);

@@ -595,6 +595,13 @@ uniform vec3 uSunCol;
 uniform vec2 uSunUv;
 uniform float uTime, uAspect, uBloom, uDirt, uStreak, uFlare, uCA, uVignette;
 uniform float uDamage, uLowHealth, uAds, uFlash, uFade, uSaturation, uSunOn, uThunder, uAgxMix;
+// ---- heat haze quanh beam: méo ảnh dọc đoạn thẳng (uv) từ miệng Spino tới điểm chạm ----
+uniform sampler2D tDepthHalf;
+uniform vec4 uHaze;      // x biên độ, y nửa bề rộng (đơn vị chiều cao màn hình * 1/z), z = 1/z đầu miệng, w = 1/z đầu điểm chạm
+uniform vec4 uHazeSeg;   // uv đầu miệng (xy), uv đầu điểm chạm (zw)
+float slHzH(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float slHzN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(slHzH(i), slHzH(i + vec2(1.0, 0.0)), f.x), mix(slHzH(i + vec2(0.0, 1.0)), slHzH(i + vec2(1.0, 1.0)), f.x), f.y); }
 
 // ---- AgX (Filament/Blender fit, as in three.js) ----
 const mat3 SL_REC2020_TO_SRGB = mat3(vec3(1.6605, -0.1246, -0.0182), vec3(-0.5876, 1.1329, -0.1006), vec3(-0.0728, -0.0083, 1.1187));
@@ -652,12 +659,33 @@ void main(){
   vec4 ad = texture2D(tAdapt, vec2(0.5));
   // radial chromatic aberration (tiny; grows a little when hurt)
   vec2 off = c * r2 * (uCA + uDamage * 0.006);
-  vec3 col = vec3(texture2D(tScene, vUv + off).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv - off).b);
+  // heat haze: chỉ méo những pixel nằm sau beam (vật ở trước beam, như cây súng, giữ nguyên)
+  vec2 hzOff = vec2(0.0);
+  if (uHaze.x > 0.001) {
+    vec2 asp = vec2(uAspect, 1.0);
+    vec2 pa = uHazeSeg.xy * asp, pb = uHazeSeg.zw * asp, pp = vUv * asp;
+    vec2 ab = pb - pa; float L2 = dot(ab, ab);
+    float t = L2 > 1e-8 ? clamp(dot(pp - pa, ab) / L2, 0.0, 1.0) : 0.0;
+    float invZ = mix(uHaze.z, uHaze.w, t);
+    float wUv = uHaze.y * invZ;
+    vec2 dd = pp - (pa + ab * t);
+    float fall = exp(-dot(dd, dd) / max(wUv * wUv, 1e-6));
+    float zPix = texture2D(tDepthHalf, vUv).r;
+    float vis = smoothstep(-1.2, 0.4, zPix - 1.0 / max(invZ, 1e-4));
+    if (fall * vis > 0.002) {
+      vec2 flow = L2 > 1e-8 ? normalize(ab) : vec2(0.0, 1.0);
+      vec2 q = pp * 34.0 - flow * uTime * 9.0 + vec2(0.0, -uTime * 4.0);   // gợn chảy ra xa miệng và bốc lên
+      vec2 nn = vec2(slHzN(q), slHzN(q * 1.7 + 11.3 + vec2(uTime * 3.0, 0.0))) - 0.5;
+      hzOff = nn * 2.0 * uHaze.x * 0.008 * fall * vis / asp;   // 0.008 = ~4px ở 540p; tăng nếu muốn gợn mạnh hơn
+    }
+  }
+  vec2 huv = vUv + hzOff;
+  vec3 col = vec3(texture2D(tScene, huv + off).r, texture2D(tScene, huv).g, texture2D(tScene, huv - off).b);
   // ADS: soften the periphery
   vec3 soft = texture2D(tBlur, vUv).rgb;
   col = mix(col, soft, uAds * 0.75 * smoothstep(0.22, 0.85, r2));
   // bloom (energy conserving mix), lens dirt, anamorphic streak
-  vec3 bloom = texture2D(tBloom, vUv).rgb;
+  vec3 bloom = texture2D(tBloom, huv).rgb;
   vec3 dirt = texture2D(tDirt, vUv).rgb;
   col = mix(col, bloom, uBloom);
   col += bloom * dirt * uDirt;
@@ -977,6 +1005,9 @@ ${fe}`,
           tBlur: { value: y.down[1].texture },
           tStreak: { value: y.streakB.texture },
           tDirt: { value: y.dirt.texture },
+          tDepthHalf: { value: y.depthHalf.texture },
+          uHaze: { value: new lt.Vector4(0, 1, 1, 1) },
+          uHazeSeg: { value: new lt.Vector4(0.5, 0.5, 0.5, 0.5) },
           ...E,
           uSunCol: { value: Mn.color.clone() },
           uSunUv: { value: new Ae(0.5, 0.5) },
@@ -1256,6 +1287,24 @@ ${fe}`,
           (be.uSunOn.value = Xe),
           (be.uAspect.value = Re),
           (be.uTime.value = ae),
+          (() => {                                   // heat haze quanh beam: đổi 2 đầu beam sang uv màn hình
+            const hz = I.haze;   // I = game.render.post; fx (beamJet/beamCharge) ghi vào đây
+            let on = 0;
+            if (hz && hz.amount > 0.002) {
+              hz._a ||= new lt.Vector3(); hz._b ||= new lt.Vector3();
+              hz._a.copy(hz.a).applyMatrix4(fe.matrixWorldInverse); hz._b.copy(hz.b).applyMatrix4(fe.matrixWorldInverse);
+              let za = -hz._a.z, zb = -hz._b.z;
+              const nz = 0.2;
+              if (za > nz || zb > nz) {
+                if (za < nz) { hz._a.lerp(hz._b, (nz - za) / (zb - za)); za = nz; }
+                else if (zb < nz) { hz._b.lerp(hz._a, (nz - zb) / (za - zb)); zb = nz; }
+                be.uHazeSeg.value.set(0.5 + 0.5 * hz._a.x / za / Te, 0.5 + 0.5 * hz._a.y / za / Pe, 0.5 + 0.5 * hz._b.x / zb / Te, 0.5 + 0.5 * hz._b.y / zb / Pe);
+                be.uHaze.value.set(hz.amount, hz.width / (2 * Pe), 1 / za, 1 / zb);
+                on = 1;
+              }
+            }
+            if (!on) be.uHaze.value.x = 0;
+          })(),
           (be.uBloom.value = ve.bloom ? g.bloom : 0),
           (be.uDirt.value = ve.bloom ? g.dirt : 0),
           (be.uStreak.value = ve.bloom ? g.streak : 0),

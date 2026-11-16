@@ -5,7 +5,7 @@
   function createArenaSentries(game) {
     const sentries = [];
     const range = 27;
-    const damage = 8;
+    const damage = 6;
     const interval = .2;
     const secondShotDelay = .075;
     const scale = 1.15 * 1.2 * 1.2;
@@ -13,6 +13,12 @@
     const gunModel = game.sentryGun;
     const position = new W(), forward = new W();
     const turretForward = new W(0, 0, 1);
+    const barrelTip = new W(0, .324, .732);
+    const mountJointHeight = .55;
+    const jointGeometry = new lt.SphereGeometry(.095, 12, 8);
+    const aimRotation = new lt.Quaternion();
+    const aimAngles = new lt.Euler(0, 0, 0, "YXZ");
+    const muzzle = new W();
     const eye = new W(), origin = new W(), aim = new W(), direction = new W();
 
     function wallDistance(from, dir, limit) {
@@ -56,17 +62,20 @@
       // Center the top of the mount beneath the gun's pivot.
       mount.position.copy(forward).multiplyScalar(.022);
       base.add(mount);
+      const joint = new lt.Mesh(jointGeometry, mount.material);
+      joint.position.y = mountJointHeight;
+      base.add(joint);
       const gun = gunModel.clone();
       gun.quaternion.fromArray(sentryGunData.rotation).premultiply(
         new lt.Quaternion().setFromAxisAngle(lt.Object3D.DEFAULT_UP, -Math.PI / 2));
-      gun.position.set(0, -.347, .06);
+      gun.position.set(0, -.023, -.004);
       pivot.add(gun);
-      pivot.position.y = .88;
+      pivot.position.y = mountJointHeight;
       pivot.quaternion.setFromUnitVectors(turretForward, forward);
       base.add(pivot);
       base.position.copy(position);
       base.scale.setScalar(scale);
-      if (sentries.length === 2) remove(sentries.shift(), true);
+      if (sentries.length === 3) remove(sentries.shift(), true);
       game.scene.add(base);
       sentries.push({ base, pivot, cooldown: .2, followUp: null });
       return true;
@@ -81,11 +90,17 @@
         direction.subVectors(aim, origin);
         const distance = direction.length();
         if (distance < 1 || distance > range) continue;
-        direction.multiplyScalar(1 / distance);
-        const hit = game.enemies.raycast(origin, direction, wallDistance(origin, direction, range));
+        const horizontal = Math.hypot(direction.x, direction.z);
+        const pitch = Math.atan2(direction.y, horizontal) - Math.asin(barrelTip.y * scale / distance);
+        aimRotation.setFromEuler(aimAngles.set(-pitch, Math.atan2(direction.x, direction.z), 0));
+        muzzle.copy(barrelTip).multiplyScalar(scale).applyQuaternion(aimRotation).add(origin);
+        direction.subVectors(muzzle, origin);
+        const muzzleDistance = direction.length();
+        if (wallDistance(origin, direction.normalize(), muzzleDistance) < muzzleDistance - .01) continue;
+        direction.copy(turretForward).applyQuaternion(aimRotation);
+        const hit = game.enemies.raycast(muzzle, direction, wallDistance(muzzle, direction, range - muzzleDistance));
         if (hit?.enemy !== target.enemy) continue;
-        sentry.pivot.quaternion.setFromUnitVectors(turretForward, direction);
-        const muzzle = origin.clone().addScaledVector(direction, .80 * scale);
+        sentry.pivot.quaternion.copy(aimRotation);
         game.fx?.muzzleFlash?.(muzzle, direction, { scale: .65 });
         game.fx?.tracer?.(muzzle, hit.point, { trail: false, intensity: 10 });
         game.audio?.play?.("sentry_shot", { pos: muzzle, gain: .65 });
@@ -103,13 +118,13 @@
       },
       update(dt) {
         if (game.player.alive && game.input.pressed("deploySentry") && !place()) {
-          game.hud.message("Không thể đặt trụ ở đây", 1.4);
+          game.hud.message("Cannot deploy a sentry here", 1.4);
         }
         if (!sentries.length) return;
         const candidates = game.enemies.list.filter(enemy => enemy.alive).map(enemy => ({
           enemy,
           aimAt(out) {
-            out.copy(enemy.pos).y += enemy.type === "hound" ? .49 * enemy.size : 0;
+            out.copy(enemy.pos).y += enemy.type === "ankylosaurus" ? .49 * enemy.size : 0;
           },
         }));
         for (const unit of [...game.defense.raptors, ...game.gigas, game.spino]) {

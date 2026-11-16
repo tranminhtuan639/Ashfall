@@ -2570,8 +2570,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
     fm = Lt,
     Gv = 44,
     B_ = 352,
-    O_ = 720,
-    H_ = 26,
+    O_ = 600,
+    H_ = 35,
     V_ = 300,
     eu = { p: [0.118, -0.122, -0.275], r: [0.034, 0.085, -0.03] },
     qv = { p: [0, -mi.sightY, -0.135], r: [0, 0, 0] },
@@ -3023,6 +3023,15 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       dt = new gi(),
       xe = new gi(),
       Ie = new gi();
+    function firingSpread(player) {
+      const movement = Fo((player.speed || 0) / 6);
+      const spread = bi(.0115, .0009, k.adsE) +
+        movement * bi(.023, .008, k.adsE) +
+        k.bloom ** 1.35 * bi(.034, .022, k.adsE) +
+        (player.onGround === false ? .032 : 0) -
+        (player.crouching ? .002 * (1 - k.adsE) : 0);
+      return spread;
+    }
     function Be() {
       let Me = i.player,
         we = i.camera;
@@ -3030,7 +3039,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         k.burst++,
         (k.lastShot = k.t),
         (k.heat = Math.min(1.3, k.heat + 0.05)));
-      let be = ve.spread,
+      let be = firingSpread(Me),
         Oe = ae() * Math.PI * 2,
         pt = Math.tan(be) * Math.sqrt(ae());
       (ze
@@ -3065,11 +3074,11 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         }));
       let bt = bi(1, 0.55, k.adsE) * (Me.crouching ? 0.85 : 1),
         Os = k.burst,
-        pn = Os <= 9 ? 1 : 0.38,
+        pn = bi(.72, 1.65, Fo((Os - 1) / 10)),
         Ti =
           (Os < 4
-            ? (ae() - 0.5) * 0.0022
-            : Math.sin(Os * 0.57 + k.recPhase) * 0.0042 +
+            ? (ae() - 0.5) * 0.0018
+            : Math.sin(Os * 0.57 + k.recPhase) * bi(.0036, .0072, Fo((Os - 3) / 10)) +
               (ae() - 0.5) * 0.002) * bt;
       (Me.addRecoil && Me.addRecoil(0.0068 * pn * bt * (0.85 + ae() * 0.3), Ti),
         Me.addShake && Me.addShake(0.12 * bt),
@@ -3077,7 +3086,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         (k.kP.v += 1.5 * bt),
         (k.kY.v += (ae() - 0.5) * 1 * bt),
         (k.kR.v += (ae() - 0.5) * 1.8 * bt),
-        (k.bloom = Math.min(1, k.bloom + 0.17)),
+        (k.bloom = Math.min(1, k.bloom + .09 + .012 * Math.min(Os, 9))),
         (k.flashT = k.flashDur = 0.036 + ae() * 0.02));
       let ho = x.material.uniforms;
       ((ho.uSeed.value = ae() * 100),
@@ -3164,7 +3173,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       (k.cooldown < 0 && (k.cooldown = Math.max(k.cooldown, -0.001)),
         k.t - k.lastShot > 0.24 &&
           (k.burst > 0 && (k.recPhase = ae() * 6.28), (k.burst = 0)),
-        (k.bloom = Math.max(0, k.bloom - Me * 1.5)),
+        (k.bloom = Math.max(0, k.bloom - Me * (k.t - k.lastShot > .16 ? 2.9 : .32))),
         k.t - k.lastShot > 0.11 &&
           k.t - k.lastShot < 0.11 + Me * 1.5 &&
           k.heat > 0.4 &&
@@ -3189,14 +3198,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       ((k.adsLin = Zn(k.adsLin + (Os ? Me : -Me) / 0.18, 0, 1)),
         (k.adsE = Yo(k.adsLin)),
         (ve.ads = k.adsE));
-      let pn = we.speed || 0,
-        Ti = Fo(pn / 6),
-        ho =
-          bi(0.0125, 0.0012, k.adsE) +
-          Ti * bi(0.013, 0.004, k.adsE) +
-          k.bloom * bi(0.0065, 0.0022, k.adsE) +
-          (we.onGround === !1 ? 0.022 : 0) -
-          (we.crouching ? 0.002 * (1 - k.adsE) : 0);
+      const pn = we.speed || 0;
+      const ho = firingSpread(we);
       ((k.spreadS = kn(k.spreadS, ho, 18, Me)),
         (ve.spread = k.spreadS),
         Oe ||

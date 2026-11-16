@@ -10,19 +10,33 @@
       south: new W(0, 0, B - 4),
     };
     const raptor = (side, hp = 180, scale = 1, targetPlayer = false) => ({ kind: "raptor", side, hp, scale, targetPlayer });
-    const ankylo = (side, size, hp, count, childHp, boss = false) => ({ kind: "hound", side, size, hp, count, childHp, boss });
+    const ankylo = (side, size, hp, count, childHp, boss = false) => ({ kind: "ankylosaurus", side, size, hp, count, childHp, boss });
     const giga = (side, hp = 3500, purpleBoss = false, introRoar = false, boss = false) => ({ kind: "giga", side, hp, purpleBoss, introRoar, boss });
     const ring = ["north", "west", "east"];
+    const flanks = ["west", "east", "south"];
+    const pack = (sides, count, targetPlayer = false) =>
+      sides.flatMap(side => Array.from({ length: count }, () => raptor(side, 180, 1, targetPlayer)));
     const stages = [
-      Array.from({ length: 4 }, (_, wave) => ring.map(side => raptor(side, wave === 3 ? 320 : 180, wave === 3 ? 1.45 : 1))),
       [
-        ring.map(side => ankylo(side, 4, 1230, 2, 345)),
-        [ankylo("west", 6, 1500, 2, 500), ankylo("east", 6, 1500, 2, 500), ankylo("south", 8, 2000, 3, 550, true)],
+        pack(ring, 2),
+        [...pack(["west", "east"], 3), ...pack(["south"], 2), raptor("south", 3600, 2, true)],
+        pack(ring, 1),
+        [...ring.map(side => raptor(side, 320, 3)), ...pack(ring, 2)],
       ],
-      [[giga("west"), giga("east")], [giga("north", 7000, true, true, true)]],
       [
-        [raptor("north", 180, 1, true), ankylo("west", 6, 1500, 2, 500), giga("east"), giga("south", 4000, true, true)],
-        [{ kind: "spino", side: "east", hp: 15000 }],
+        [...ring.map(side => ankylo(side, 4, 1230, 2, 345)), ...pack(flanks, 2, true)],
+        [ankylo("west", 6, 1500, 2, 500), ankylo("east", 6, 1500, 2, 500),
+          ankylo("south", 8, 2000, 3, 550, true), ...pack(flanks, 2, true)],
+      ],
+      [
+        [giga("west"), giga("east"), ankylo("south", 4, 1230, 2, 345), ankylo("south", 4, 1230, 2, 345)],
+        [giga("north", 7000, true, true, true)],
+      ],
+      [
+        [...pack(["north", "east"], 1, true), raptor("south", 3600, 3, true),
+          ankylo("west", 4, 1230, 2, 345), ankylo("south", 8, 2000, 3, 550),
+          giga("east"), giga("south", 4000, true, true)],
+        [{ kind: "spino", side: "east", hp: 30000 }],
       ],
     ];
     const lines = {
@@ -35,6 +49,7 @@
       firstCall: "Did that roar just summon TWO purple Gigas?! Focus the Spino before they overwhelm you!",
       halfCall: "It's below half health and calling for backup! Two Gigas just spawned on the West and East flanks—watch your sides, Private!",
       repeatCall: "What?! That wasn't in our intel! Ignore the Gigas—focus on the Apex Spinosaurus!",
+      repeatAgain: "What the—?! It can do that again?!",
       extract: "Target neutralized! Outstanding work, Private. Head back to the rig and press [2] to extract!",
     };
     function radio(key) {
@@ -48,9 +63,12 @@
     const pending = [];
     const purpleSlots = gigas.slice(5, 9);
     let stage, wave, countdown, extract, active, boss, summoned, entryElapsed, deployAnnounced, ankyloAnnounced;
+    let purpleSummons;
     function reset() {
+      purpleSummons = 0;
+      game.events.emit("arena:music", { track: null });
       stage = wave = 0;
-      countdown = 7;
+      countdown = 12;
       entryElapsed = 0;
       deployAnnounced = ankyloAnnounced = false;
       extract = active = summoned = false;
@@ -59,6 +77,7 @@
       pending.length = 0;
       transport.health = 100;
       transport.setReady(false);
+      hud.setStageCountdown(null);
       hud.setBossHealth(null);
       hud.setTransportHealth(null);
       for (const unit of units) unit.reset();
@@ -77,14 +96,16 @@
       return null;
     }
     function spawn(spec) {
-      const pos = openPoint(spec.pos || gates[spec.side], [...ankyloAlive.keys()].map(enemy => enemy.pos));
+      const occupied = [...ankyloAlive.keys()].map(enemy => enemy.pos);
+      for (const unit of raptors) if (unit.alive) occupied.push(unit.position);
+      const pos = openPoint(spec.pos || gates[spec.side], occupied);
       if (!pos) return false;
       if (spec.kind === "raptor") {
         const unit = raptors.find(raptor => !raptor.started || raptor.done);
         if (!unit) return false;
         unit.start(pos, spec);
-      } else if (spec.kind === "hound") {
-        const enemy = game.enemies.spawn("hound", pos, { size: spec.size, hp: spec.hp,
+      } else if (spec.kind === "ankylosaurus") {
+        const enemy = game.enemies.spawn("ankylosaurus", pos, { size: spec.size, hp: spec.hp,
           state: "alert", target: player.pos, damageScale: spec.size === 1 ? .2 : 1,
           yaw: Math.atan2(player.pos.x - pos.x, player.pos.z - pos.z) });
         if (!enemy) return false;
@@ -104,6 +125,7 @@
       } else {
         spino.start(pos, position => {
           summoned = true;
+          purpleSummons = 1;
           boss = { unit: spino, hp: spec.hp, kind: spec.kind };
           queueReinforcements([-10, 10].map(z => ({
             ...giga("east", 5500, true, true), pos: position.clone().add(new W(-6, 0, z)),
@@ -125,7 +147,7 @@
       game.fx?.explosion?.(turretPos || origin, spec.size === 1 ? .9 : 2.3, { customAudio: spec.size !== 1 });
       for (let index = 0; index < (spec.count || 0); index++) {
         const angle = enemy.yaw + index * Math.PI * 2 / spec.count;
-        pending.push({ kind: "hound", size: 1, hp: spec.childHp, delay: .5,
+        pending.push({ kind: "ankylosaurus", size: 1, hp: spec.childHp, delay: .5,
           pos: origin.clone().add(new W(Math.sin(angle) * 4, 0, Math.cos(angle) * 4)) });
       }
     });
@@ -148,6 +170,11 @@
       specs.forEach((spec, index) => pending.push({ ...spec, delay: stage < 2 ? index * .35 : 0 }));
       boss = null;
       active = true;
+      hud.setStageCountdown(null);
+      game.events.emit("arena:music", {
+        track: stage === 3 && wave === 1 ? null : "combat",
+        gain: stage === 3 ? .65 : 1,
+      });
       hud.setObjective(objective());
       if (stage === 2) radio(wave === 0 ? "giga" : "purple");
       if (stage === 3) radio(wave === 0 ? "mixed" : "spino");
@@ -156,7 +183,10 @@
     function update(dt) {
       hud.setTransportHealth(stage === 0 ? transport.health : null);
       if (stage === 0 && wave === 0) {
-        if (entryElapsed === 0) hud.setObjective(objective());
+        if (entryElapsed === 0) {
+          hud.setObjective(objective());
+          game.events.emit("arena:music", { track: "ambient" });
+        }
         entryElapsed += dt;
         if (!deployAnnounced && entryElapsed >= 4 - 1e-8) {
           deployAnnounced = true;
@@ -176,6 +206,7 @@
       if (!active) {
         countdown -= dt;
         if (countdown > 1e-8) {
+          if (wave === 0) hud.setStageCountdown(stage + 1, Math.ceil(countdown - 1e-8));
           for (const unit of units) if (unit.started) unit.update(dt);
           return true;
         }
@@ -201,10 +232,10 @@
         spino.summonReinforcements(() => {
           queueReinforcements(["north", "south"].map(side => ({
             ...giga(side, 5500, true, true), reinforcement: "purple",
-          })), "repeatCall");
+          })), ++purpleSummons === 2 ? "repeatCall" : "repeatAgain");
         });
       }
-      const hp = boss && !boss.unit.invulnerable && (boss.kind === "hound" ? (ankyloAlive.has(boss.unit) ? boss.unit.hp : 0) : boss.unit.health);
+      const hp = boss && !boss.unit.invulnerable && (boss.kind === "ankylosaurus" ? (ankyloAlive.has(boss.unit) ? boss.unit.hp : 0) : boss.unit.health);
       hud.setBossHealth(hp > 0 ? hp / boss.hp : null);
       if (pending.length || ankyloAlive.size || raptors.some(unit => unit.alive) ||
           gigas.some(unit => unit.alive) || (spino.started && (!summoned || !spino.done))) return true;
@@ -212,16 +243,19 @@
       if (stage === 2 && wave === 1 && !boss?.unit.done) return true;
       if (stage === 3 && wave === 1) {
         extract = true;
+        game.events.emit("arena:music", { track: "ambient" });
         transport.setReady(true);
         hud.setObjective("Board the transport. Press to extract.");
         radio("extract");
         return true;
       }
       active = false;
+      game.events.emit("arena:music", { track: "ambient" });
       countdown = stage === 3 && wave === 0 ? 6 : 2;
       if (++wave === stages[stage].length) {
         stage++;
         wave = 0;
+        countdown = 15;
       }
       return true;
     }

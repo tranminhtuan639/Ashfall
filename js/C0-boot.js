@@ -141,7 +141,7 @@
           o({ cam: [...f.cam, ...(f.target || [0, 1, 0])].join(",") }));
     } else {
       if (
-        (await Nr("Dựng khán đài", 0.34),
+        (await Nr("Loading the arena", 0.34),
         await r("level", "level", () => buildColosseum(t), !0),
         await r("defense", "defense", () => setupRaptorDefense(t), !0),
         await r("sentryGun", "sentryGun", () => loadDefenseMesh(sentryGunData), !0),
@@ -160,9 +160,9 @@
           t.gigas = gigas;
           return gigas[0];
         }, !0),
-        await Nr("Chuẩn bị sân", 0.5),
+        await Nr("Preparing the arena", 0.5),
         await r("backdrop", "backdrop", () => dr.backdrop()),
-        await Nr("Tạo nền ướt", 0.58),
+        await Nr("Loading terrain", 0.58),
         await r("ground", "ground", () => O1(t)),
         t.ground.stub)
       ) {
@@ -181,7 +181,7 @@
         (t.combat = zv(t)),
         await Nr("Checking the rifle", 0.74),
         await r("weapon", "weapon", () => dm(t)),
-        await Nr("Chuẩn bị điều khiển", 0.82),
+        await Nr("Preparing controls", 0.82),
         await r("enemies", "enemies", () => Em(t)),
         await r("hud", "hud", () => hM(t)),
         (t.game = mM(t)));

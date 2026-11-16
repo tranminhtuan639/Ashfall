@@ -105,10 +105,10 @@
       const missing = weapon.reserveCapacity - weapon.reserve;
       if (missing > 0 && input.pressed("interact")) {
         weapon.addAmmo(missing);
-        hud.message("Đã tiếp đạn dự trữ", 1.5);
+        hud.message("Reserve ammo refilled", 1.5);
       }
-      if (weapon.reserve >= weapon.reserveCapacity) hud.setPrompt("Đạn đã đầy", 0, "status");
-      else hud.setPrompt("Lấy đạn", 0, "press");
+      if (weapon.reserve >= weapon.reserveCapacity) hud.setPrompt("Ammo full", 0, "status");
+      else hud.setPrompt("Resupply ammo", 0, "press");
     }
 
     const transport = {
@@ -123,7 +123,7 @@
         return truckBounds.distanceToPoint(pos) <= 2.5;
       },
     };
-    const raptors = Array.from({ length: 3 }, () => createDefenseRaptor(game, raptorMesh.clone(), transport));
+    const raptors = Array.from({ length: 9 }, () => createDefenseRaptor(game, raptorMesh.clone(), transport));
     return { raptors, updateAmmoPickup, transport };
   }
 
@@ -175,6 +175,7 @@
       game.fx?.explosion?.(raptor.pos.clone().add(new W(0, .7, 0)), 1.3, { customAudio });
     }
     return {
+      get position() { return raptor.pos; },
       get alive() { return raptor.alive; },
       get sentryTarget() {
         return raptor.alive ? { enemy: raptor, aimAt: out => out.copy(localBody).multiplyScalar(size).applyAxisAngle(lt.Object3D.DEFAULT_UP, model.rotation.y).add(raptor.pos) } : null;

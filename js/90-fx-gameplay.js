@@ -3551,9 +3551,13 @@ void main() {
     // ---- beamJet: hạt + đèn + vết cháy cho tia sét năng lượng (gọi mỗi frame khi beam đang bắn) ----
     // Thân beam (shader plasma, sét ribbon) do module của boss vẽ; ở đây chỉ phát (1) tia lửa điện tạt ra từ thân beam,
     // (2) chấm sáng trôi dọc beam, (3) flare ở miệng, (4) 2 đèn động nhấp nháy, (5) chỗ chạm: tia lửa văng, khói, vết cháy.
-    const beamAcc = [0, 0, 0, 0, 0, 0], beamFwd = new W(), beamU = new W(), beamR = new W(), beamV = new W(), beamP = new W();
+    const beamAcc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], beamFwd = new W(), beamU = new W(), beamR = new W(), beamV = new W(), beamP = new W();
     const beamHit = new W(), beamN = new W(), beamLights = [null, null];
     let beamIdle = 9, beamT = 0, beamScorch = 0;
+    function hazeState() {   // trạng thái heat haze nằm trong game.render.post để pass render đọc được
+      const ps = i.render && i.render.post;
+      return ps ? (ps.haze || (ps.haze = { amount: 0, ampT: 0, a: new W(), b: new W(), width: 1 })) : null;
+    }
     function beamLobe(x, y, z, vx, vy, vz, life, s0, s1, cr, cg, cb, rise, shade) {
       const id = l.emit(x, y, z, vx, vy, vz, life, s0, s1);
       if (id < 0) return -1;
@@ -3583,6 +3587,8 @@ void main() {
       beamU.crossVectors(beamR, beamFwd).normalize();
       beamIdle = 0;
       beamT += dt;
+      const hz = hazeState();   // heat haze: render đọc đoạn thẳng này
+      if (hz) { hz.ampT = 1; hz.a.copy(origin); hz.b.copy(origin).addScaledVector(beamFwd, len); hz.width = 1.2 * sc; }
       const shade = m(origin, null), flick = 0.85 + 0.15 * Math.sin(beamT * 73 + 1.3);
       beamAcc[0] += dt * 150; beamAcc[1] += dt * 55; beamAcc[2] += dt * 20;
       // (1) tia lửa điện tạt ra khỏi thân beam
@@ -3603,11 +3609,53 @@ void main() {
         const id = c.emit(origin.x + beamFwd.x * sDist + (beamR.x * Math.cos(a) + beamU.x * Math.sin(a)) * 0.9 * sc,
           origin.y + beamFwd.y * sDist + (beamR.y * Math.cos(a) + beamU.y * Math.sin(a)) * 0.9 * sc,
           origin.z + beamFwd.z * sDist + (beamR.z * Math.cos(a) + beamU.z * Math.sin(a)) * 0.9 * sc,
-          beamFwd.x * 18, beamFwd.y * 18, beamFwd.z * 18, Ze(0.12, 0.26), 1.1 * sc, 0.2 * sc);
+          beamFwd.x * 18, beamFwd.y * 18, beamFwd.z * 18, Ze(0.12, 0.26), 1.7 * sc, 0.5 * sc);
         if (id >= 0) {
-          c.frame[id] = V1; c.ramp[id] = 4; c.r[id] = 2.4; c.g[id] = 0.7; c.b[id] = 4.8;
+          c.frame[id] = V1; c.ramp[id] = 4; c.r[id] = 1.5; c.g[id] = 0.45; c.b[id] = 3.2;
           c.drag[id] = 0.5; c.fin[id] = 0.1; c.fout[id] = 0.5;
         }
+      }
+      // (2b) thân plasma dạng thể tích: cụm lobe flipbook chảy dọc beam (cùng kỹ thuật lớp lửa của flameJet),
+      //      tàn điện bay chậm, khói ion hoá mờ và lưỡi plasma phụt ra từ miệng
+      beamAcc[6] += dt * 95; beamAcc[7] += dt * 26; beamAcc[8] += dt * 9; beamAcc[10] += dt * 70;
+      while (beamAcc[6] >= 1) {
+        beamAcc[6] -= 1;
+        const sDist = len * Math.pow(ht(), 1.25), a = ht() * 6.283, ca = Math.cos(a), sa = Math.sin(a), core = ht() < 0.4;
+        beamV.set(beamR.x * ca + beamU.x * sa, beamR.y * ca + beamU.y * sa, beamR.z * ca + beamU.z * sa);
+        const off = (core ? 0.12 : 0.3) * sc * ht(), out = Ze(0.2, 1.2), fw = Ze(14, 32);
+        beamLobe(origin.x + beamFwd.x * sDist + beamV.x * off, origin.y + beamFwd.y * sDist + beamV.y * off, origin.z + beamFwd.z * sDist + beamV.z * off,
+          beamV.x * out + beamFwd.x * fw, beamV.y * out + beamFwd.y * fw, beamV.z * out + beamFwd.z * fw,
+          core ? Ze(0.12, 0.22) : Ze(0.18, 0.32), (core ? 0.5 : 0.65) * sc, (core ? 1.0 : 1.5) * sc,
+          core ? 6 : 3.0, core ? 2.4 : 0.7, core ? 8 : 5.2, 0.3, shade);
+      }
+      while (beamAcc[7] >= 1) {                                   // tàn điện trôi chậm quanh beam
+        beamAcc[7] -= 1;
+        const sDist = len * ht(), a = ht() * 6.283, ca = Math.cos(a), sa = Math.sin(a), rr = Ze(0.8, 2.4) * sc, sp = Ze(1, 4);
+        const id = c.emit(origin.x + beamFwd.x * sDist + (beamR.x * ca + beamU.x * sa) * rr,
+          origin.y + beamFwd.y * sDist + (beamR.y * ca + beamU.y * sa) * rr,
+          origin.z + beamFwd.z * sDist + (beamR.z * ca + beamU.z * sa) * rr,
+          (beamR.x * ca + beamU.x * sa) * sp + beamFwd.x * Ze(0, 6), (beamR.y * ca + beamU.y * sa) * sp + beamFwd.y * Ze(0, 6), (beamR.z * ca + beamU.z * sa) * sp + beamFwd.z * Ze(0, 6),
+          Ze(1.1, 2.4), 0.09 * sc, 0.03 * sc);
+        if (id >= 0) {
+          c.frame[id] = oo; c.ramp[id] = 3; c.r[id] = 7; c.g[id] = 1.4; c.b[id] = 10;
+          c.drag[id] = 0.8; c.grav[id] = -0.6; c.turb[id] = 4; c.wind[id] = 1; c.fout[id] = 0.5;
+        }
+      }
+      while (beamAcc[8] >= 1) {                                   // khói ion hoá mờ ở nửa sau beam
+        beamAcc[8] -= 1;
+        const d = len * Ze(0.3, 1), g = Ze(0.04, 0.08);
+        ro(beamFwd, 0.5, beamV);
+        const id = _(origin.x + beamFwd.x * d, origin.y + beamFwd.y * d, origin.z + beamFwd.z * d,
+          beamFwd.x * 3 + (ht() - 0.5), beamFwd.y * 3 + Ze(0.3, 1.2), beamFwd.z * 3 + (ht() - 0.5),
+          Ze(1.4, 2.2), 1.0 * sc, Ze(3, 4.6) * sc, g * 1.1, g * 0.8, g * 1.4, 0.32, shade, 1.1, 0.9, 1, -1);
+        if (id >= 0) { l.fin[id] = 0.2; l.turb[id] = 1; }
+      }
+      while (beamAcc[10] >= 1) {                                  // lưỡi plasma phụt ra từ miệng
+        beamAcc[10] -= 1;
+        ro(beamFwd, 0.5, beamV);
+        const sp = Ze(10, 24);
+        beamLobe(origin.x + beamFwd.x * 0.3, origin.y + beamFwd.y * 0.3, origin.z + beamFwd.z * 0.3,
+          beamV.x * sp, beamV.y * sp, beamV.z * sp, Ze(0.18, 0.32), 1.1 * sc, 2.6 * sc, 6, 2.2, 8, 0.2, shade);
       }
       // (3) flare ở miệng
       w(origin.x + beamFwd.x * 0.4, origin.y + beamFwd.y * 0.4, origin.z + beamFwd.z * 0.4,
@@ -3620,7 +3668,7 @@ void main() {
         const bl = beamLights[k];
         if (!bl) continue;
         const L = bl.light;
-        L.color.setRGB(0.62 + 0.1 * Math.sin(beamT * 41 + k), 0.28, 1);
+        L.color.setRGB(0.62 + 0.1 * Math.sin(beamT * 41 + k), 0.28 + 0.1 * Math.sin(beamT * 37 + k * 2), 1);
         if (k === 0) {
           const d = Math.min(len * 0.45, 16);
           L.position.set(origin.x + beamFwd.x * d, origin.y + beamFwd.y * d, origin.z + beamFwd.z * d);
@@ -3632,6 +3680,7 @@ void main() {
       }
       // (5) chỗ chạm
       if (o.hit) {
+        beamAcc[9] += dt * 7;
         beamHit.copy(o.hit);
         if (o.normal && o.normal.isVector3) beamN.copy(o.normal); else beamN.set(0, 1, 0);
         beamAcc[3] += dt * 190; beamAcc[4] += dt * 26; beamAcc[5] += dt * 9;
@@ -3656,7 +3705,48 @@ void main() {
           _(beamHit.x + beamN.x * 0.5, beamHit.y + beamN.y * 0.5, beamHit.z + beamN.z * 0.5,
             (ht() - 0.5) * 3, Ze(2, 5), (ht() - 0.5) * 3, Ze(1.6, 2.6), 1.2 * sc, Ze(3.6, 5.4) * sc, g, g * 0.95, g * 0.9, 0.5, shade, 1.1, 0.9, 1, -1);
         }
+        while (beamAcc[9] >= 1) {                                   // sóng bụi toả ra theo mặt đất
+          beamAcc[9] -= 1;
+          for (let q = 0; q < 6; q++) {
+            ro(beamN, 3, beamP);
+            const sp = Ze(6, 14), g = Ze(0.1, 0.14);
+            _(beamHit.x + beamN.x * 0.3, beamHit.y + beamN.y * 0.3, beamHit.z + beamN.z * 0.3,
+              beamP.x * sp, beamP.y * sp * 0.4 + 0.8, beamP.z * sp, Ze(1, 1.8), 0.9 * sc, Ze(3, 5) * sc, g * 1.1, g, g * 0.95, 0.45, shade, 1.4, 0.9, 1, -1);
+          }
+        }
         if ((beamScorch -= dt) <= 0) { beamScorch = 0.22; p.add(beamHit, beamN, "scorch", 4.4); }
+      }
+    }
+    function beamCharge(origin, pr, o = {}) {
+      const dt = Math.min(o.dt || 1 / 60, 0.1), r = o.radius || 1;
+      beamIdle = 0;
+      beamT += dt;
+      const hz = hazeState();
+      if (hz) { hz.ampT = 0.25 + 0.6 * pr; hz.a.copy(origin); hz.b.copy(origin); hz.width = r * 1.8 + 0.6; }
+      const shade = m(origin, null), flick = 0.85 + 0.15 * Math.sin(beamT * 67);
+      beamAcc[11] += dt * (14 + 70 * pr); beamAcc[12] += dt * (6 + 60 * pr);
+      while (beamAcc[11] >= 1) {                                  // cụm plasma xoáy quanh cầu
+        beamAcc[11] -= 1;
+        beamP.set(ht() - 0.5, ht() - 0.5, ht() - 0.5).normalize();
+        const sp = Ze(0.5, 3);
+        beamLobe(origin.x + beamP.x * r * 0.8, origin.y + beamP.y * r * 0.8, origin.z + beamP.z * r * 0.8,
+          beamP.x * sp, beamP.y * sp, beamP.z * sp, Ze(0.25, 0.5), (0.5 * r + 0.2), (1.1 + 1.2 * pr) * r,
+          ht() < 0.4 ? 6 : 3.4, ht() < 0.4 ? 2.2 : 0.32, ht() < 0.4 ? 8 : 5.6, 0, shade);
+      }
+      while (beamAcc[12] >= 1) {                                  // tia lửa điện bắn ra từ cầu
+        beamAcc[12] -= 1;
+        beamP.set(ht() - 0.5, ht() - 0.5, ht() - 0.5).normalize();
+        const sp = Ze(6, 18) * (0.4 + pr);
+        beamSpark(origin.x + beamP.x * r, origin.y + beamP.y * r, origin.z + beamP.z * r,
+          beamP.x * sp, beamP.y * sp, beamP.z * sp, Ze(0.15, 0.4), 0.06, 2, 3.5, 0.9, 7);
+      }
+      if (!beamLights[0]) { const pool = y(); beamLights[0] = pool && pool.acquire ? pool.acquire() : null; }
+      const bl = beamLights[0];
+      if (bl) {
+        const L = bl.light;
+        L.color.setRGB(0.6 + 0.1 * Math.sin(beamT * 41), 0.25 + 0.1 * Math.sin(beamT * 37), 1);
+        L.position.set(origin.x, origin.y, origin.z);
+        L.distance = 10 + 22 * pr; L.intensity = (30 + 240 * pr) * flick;
       }
     }
     function ue(ee) {
@@ -3664,6 +3754,7 @@ void main() {
       jetIdle += ee;
       if (jetLight && jetIdle > 0.12) { jetLight.release(); jetLight = null; jetAcc.fill(0); }
       beamIdle += ee;
+      { const hz = hazeState(); if (hz) hz.amount += ((beamIdle < 0.12 ? hz.ampT : 0) - hz.amount) * Math.min(1, ee * 10); }
       if (beamIdle > 0.12) { for (let k = 0; k < 2; k++) if (beamLights[k]) { beamLights[k].release(); beamLights[k] = null; } beamAcc.fill(0); }
       let B = i.camera ? i.camera.position : Es.set(0, 0, 0);
       (r.begin(),
@@ -3680,12 +3771,14 @@ void main() {
       (l.clear(), c.clear(), u.clear(), h.clear(), f.clear(), p.clear());
       for (let ee of ie) ee.active && ee.stop();
       jetLight && (jetLight.release(), (jetLight = null));
+      { const hz = hazeState(); if (hz) hz.amount = 0; }
       for (let k = 0; k < 2; k++) beamLights[k] && (beamLights[k].release(), (beamLights[k] = null));
       (r.begin(), r.end(), a.begin(), a.end());
     }
     return {
       flameJet,
       beamJet,
+      beamCharge,
       update: ue,
       clear: me,
       muzzleFlash: j,
@@ -5043,6 +5136,8 @@ void main() {
     return () => Float32Array.from(new Int16Array(assetBytes(mechaAudio[name])), sample => sample / 32768);
   }
 
+  const victoryAudio = /*@inline:data/victory-audio.json*/ null;
+
   const handlerAudio = /*@inline:data/handler-audio.json*/ null;
 
   const playerAkAudio = /*@inline:data/player-ak-audio.json*/ null;
@@ -6258,18 +6353,7 @@ void main() {
         ref: 5,
         roll: 0.6,
       },
-      gull_fire: {
-        gen: E8,
-        n: 2,
-        sr: ki,
-        peak: 0.85,
-        bus: "world",
-        max: 5,
-        pri: 7,
-        ref: 7,
-        roll: 0.55,
-      },
-      hound_fire: {
+      ankylosaurus_fire: {
         gen: S8,
         n: 2,
         sr: ki,
@@ -6292,7 +6376,7 @@ void main() {
       giga_foley: { gen: gigaSample("giga_foley"), n: 1, sr: 24000, peak: .65, bus: "world", loop: true, ref: 6, boot: true },
       giga_fire: { gen: gigaFireNoise, n: 1, sr: 24000, peak: .72, bus: "world", loop: true, ref: 10, boot: true },
       giga_ignite: { gen: gigaFireIgnition, n: 1, sr: 24000, peak: .8, bus: "world", max: 1, pri: 8, ref: 10, boot: true },
-      hound_step: {
+      ankylosaurus_step: {
         gen: T8,
         n: 3,
         sr: Xn,
@@ -6303,18 +6387,7 @@ void main() {
         ref: 5,
         roll: 0.8,
       },
-      gull_die: {
-        gen: A8,
-        n: 1,
-        sr: Xn,
-        peak: 0.85,
-        bus: "world",
-        max: 3,
-        pri: 7,
-        ref: 7,
-        roll: 0.5,
-      },
-      hound_die: {
+      ankylosaurus_die: {
         gen: R8,
         n: 1,
         sr: Xn,
@@ -6379,15 +6452,6 @@ void main() {
         max: 1,
         pri: 2,
       },
-      gull_cry: {
-        gen: k8,
-        n: 2,
-        sr: pl,
-        peak: 0.4,
-        bus: "world",
-        max: 2,
-        pri: 1,
-      },
       halyard: {
         gen: F8,
         n: 2,
@@ -6443,11 +6507,16 @@ void main() {
         pri: 9,
       },
       complete: {
-        gen: J8,
+        gen() {
+          const samples = new Int16Array(assetBytes(victoryAudio));
+          return [0, 1].map(channel => Float32Array.from(
+            { length: samples.length / 2 }, (_, index) => samples[index * 2 + channel] / 32768));
+        },
         n: 1,
         sr: Xn,
-        peak: 0.7,
-        bus: "music",
+        peak: 0.82,
+        bus: "dry",
+        boot: true,
         max: 1,
         pri: 9,
       },
@@ -6460,16 +6529,7 @@ void main() {
         max: 1,
         pri: 9,
       },
-      gull_rotor: {
-        gen: _8,
-        n: 1,
-        sr: Xn,
-        peak: 0.6,
-        loop: 1,
-        ref: 5,
-        roll: 0.9,
-      },
-      hound_servo: {
+      ankylosaurus_servo: {
         gen: M8,
         n: 1,
         sr: Xn,
@@ -6583,8 +6643,7 @@ void main() {
       "death",
       "explosion",
       "rifle_tail_in",
-      "gull_die",
-      "hound_die",
+      "ankylosaurus_die",
       "relay_cut",
       "container_bang",
       "ear_ring",
@@ -6611,20 +6670,17 @@ void main() {
       "impact_water",
       "impact_glass",
       "ricochet",
-      "gull_rotor",
-      "hound_servo",
+      "ankylosaurus_servo",
       "alert",
       "telegraph",
-      "gull_fire",
-      "hound_fire",
-      "hound_step",
+      "ankylosaurus_fire",
+      "ankylosaurus_step",
       "ui_click",
       "ui_hover",
       "sea",
       "rain_interior",
       "relay_hum",
-      "gull_die",
-      "hound_die",
+      "ankylosaurus_die",
       "explosion",
       "ear_ring",
       "death",
@@ -6636,7 +6692,6 @@ void main() {
       "thunder",
       "objective_all",
       "complete",
-      "gull_cry",
       "halyard",
       "foghorn",
       "container_bang",
@@ -6848,6 +6903,10 @@ void main() {
       b("ir_shed", 0, (te) => {
         C.buffer = te;
       }));
+    const arenaMusic = t ? null : createArenaMusic(e, A);
+    arenaMusic?.preload();
+    if (!i.level?.stub) arenaMusic?.select("ambient");
+    let spinoCharging = false;
     const handlerBuffers = new Map();
     const handlerGain = m(1.15);
     handlerGain.connect(H.dry);
@@ -7065,7 +7124,7 @@ void main() {
       he = he || {};
       let pe = Go[te];
       if (!pe || !pe.loop) return Ie;
-      let ge = (te === "gull_rotor" || te === "hound_servo") && !he._auto;
+      let ge = te === "ankylosaurus_servo" && !he._auto;
       ge && !he.hrtf && (he = Object.assign({ hrtf: !0 }, he));
       let ye = {
           name: te,
@@ -7199,7 +7258,6 @@ void main() {
       nn = 2,
       bt = {
         fog: 14 + s() * 14,
-        gull: 5 + s() * 8,
         hal: 4 + s() * 6,
         bang: 20 + s() * 25,
       };
@@ -7216,43 +7274,6 @@ void main() {
           jitter: 0.01,
         });
       }
-      if ((bt.gull -= te) <= 0) {
-        bt.gull = 9 + s() * 16;
-        let ge = s() * 6.283,
-          ye = 35 + s() * 50;
-        ze("gull_cry", {
-          pos: [
-            re.x + Math.cos(ge) * ye,
-            14 + s() * 18,
-            re.z + Math.sin(ge) * ye,
-          ],
-          ref: ye,
-          roll: 1,
-          gain: (0.16 + s() * 0.16) * he * pe,
-          jitter: 0.1,
-        });
-      }
-      if (
-        ((bt.hal -= te) <= 0 &&
-          ((bt.hal = 6 + s() * 11),
-          ze("halyard", {
-            pos: [29 + s() * 8, 3 + s() * 6, -8 + s() * 32],
-            ref: 16,
-            roll: 0.5,
-            gain: (0.3 + s() * 0.3) * he * pe,
-            jitter: 0.08,
-          })),
-        (bt.bang -= te) <= 0)
-      ) {
-        bt.bang = 28 + s() * 34;
-        let ge = 1.6 + s() * 3.2;
-        ze("container_bang", {
-          pos: [re.x + Math.cos(ge) * 150, 4, re.z + Math.sin(ge) * 150],
-          ref: 150,
-          gain: (0.2 + s() * 0.16) * he * pe,
-          jitter: 0.12,
-        });
-      }
     }
     let pn = new Map(),
       Ti = 0;
@@ -7261,10 +7282,9 @@ void main() {
         xe ||
         pn.has(te) ||
         te.alive === !1 ||
-        (te.type === "giganotosaurus" || te.type === "spinosaurus") ||
+        te.type !== "ankylosaurus" ||
         pn.set(te, {
           h: null,
-          type: te.type === "hound" ? "hound" : "gull",
           lx: te.pos ? te.pos.x : 0,
           ly: te.pos ? te.pos.y : 0,
           lz: te.pos ? te.pos.z : 0,
@@ -7312,7 +7332,7 @@ void main() {
           let ge = Un[pe],
             ye = pe < 6 && ge.d < 90;
           ye && !ge.h
-            ? (ge.h = Be(ge.type === "gull" ? "gull_rotor" : "hound_servo", {
+            ? (ge.h = Be("ankylosaurus_servo", {
                 pos: [ge.lx, ge.ly, ge.lz],
                 gain: 0,
                 hrtf: !0,
@@ -7329,15 +7349,15 @@ void main() {
             let ye = Math.hypot(ge.x - pe.lx, ge.y - pe.ly, ge.z - pe.lz) / te;
             pe.sp += (Math.min(ye, 30) - pe.sp) * Math.min(1, te * 5);
           }
-          if (((pe.lx = ge.x), (pe.ly = ge.y), (pe.lz = ge.z), !!pe.h))
-            if ((pe.h.setPos(ge), pe.type === "gull"))
-              (pe.h.setGain(1),
-                pe.h.setPitch(pe.tune * (0.94 + 0.3 * pi(pe.sp / 10, 0, 1))));
-            else {
-              let ye = pi(pe.sp / 3, 0, 1);
-              (pe.h.setGain(0.3 + 0.5 * ye),
-                pe.h.setPitch(pe.tune * (0.88 + 0.3 * ye)));
-            }
+          pe.lx = ge.x;
+          pe.ly = ge.y;
+          pe.lz = ge.z;
+          if (pe.h) {
+            pe.h.setPos(ge);
+            const speed = pi(pe.sp / 3, 0, 1);
+            pe.h.setGain(.3 + .5 * speed);
+            pe.h.setPitch(pe.tune * (.88 + .3 * speed));
+          }
         }
       }
     }
@@ -7525,7 +7545,7 @@ void main() {
       ln("enemy:spawn", ({ enemy }) => {
         ho(enemy);
         if (enemy.type === "raptor") ze("raptor_spawn", { pos: enemy.pos, gain: 1.15 });
-        if (enemy.type === "hound") {
+        if (enemy.type === "ankylosaurus") {
           const small = enemy.size === 1;
           ze(small ? "ankylo_small_spawn" : "ankylo_spawn", {
             pos: enemy.pos, gain: small ? .72 : 1.3,
@@ -7544,14 +7564,15 @@ void main() {
         let pe = te.enemy || {};
         ze("alert", {
           pos: Hn(pe.pos) || Hn(te.pos),
-          variant: pe.type === "hound" ? 1 : 0,
+          variant: pe.type === "ankylosaurus" ? 1 : 0,
           gain: 0.9,
         });
       }),
       ln("enemy:fire", (te) => {
         let he = te.type || (te.enemy && te.enemy.type),
           pe = Hn(te.pos) || (te.enemy && Hn(te.enemy.pos));
-        (ze(he === "hound" ? "hound_fire" : "gull_fire", {
+        if (he !== "ankylosaurus") return;
+        (ze("ankylosaurus_fire", {
           pos: pe,
           gain: 1,
           jitter: 0.04,
@@ -7560,20 +7581,19 @@ void main() {
       }),
       ln("enemy:step", (te) => {
         if (te.crash) {
-          (ze("hound_step", { pos: Hn(te.pos), gain: 1, pitch: 0.72 }),
+          (ze("ankylosaurus_step", { pos: Hn(te.pos), gain: 1, pitch: 0.72 }),
             ze("impact_metal", { pos: Hn(te.pos), gain: 0.8, pitch: 0.55 }));
           return;
         }
         if (te.ankylosaurus) {
           const scale = te.enemy.size;
-          ze("hound_step", { pos: Hn(te.pos), gain: scale > 1 ? 1.05 : .65,
+          ze("ankylosaurus_step", { pos: Hn(te.pos), gain: scale > 1 ? 1.05 : .65,
             pitch: scale > 1 ? .66 : .96, ref: scale > 1 ? 10 : 5 });
           ze("impact_metal", { pos: Hn(te.pos), gain: scale > 1 ? .32 : .15,
             pitch: scale > 1 ? .67 : 1 });
           return;
         }
-        te.type !== "gull" &&
-          ze("hound_step", {
+          ze("ankylosaurus_step", {
             pos: Hn(te.pos),
             gain: pi(0.6 + (+te.speed || 2) * 0.1, 0.6, 1),
             jitter: 0.06,
@@ -7585,7 +7605,7 @@ void main() {
           ge = pi(+te.time || 0.55, 0.15, 1.5);
         (ze("telegraph", {
           pos: Hn(te.pos) || Hn(he.pos),
-          variant: pe === "hound" ? 1 : 0,
+          variant: pe === "ankylosaurus" ? 1 : 0,
           pitch: 0.55 / ge,
           gain: te.melee ? 0.7 : 1,
           jitter: 0,
@@ -7594,7 +7614,7 @@ void main() {
       }),
       ln("enemy:melee", (te) => {
         let he = Hn(te.pos) || (te.enemy && Hn(te.enemy.pos));
-        (ze("hound_step", { pos: he, gain: 1, pitch: 0.8 }),
+        (ze("ankylosaurus_step", { pos: he, gain: 1, pitch: 0.8 }),
           ze("impact_metal", { pos: he, gain: 0.9, pitch: 0.7 }),
           ze("hurt", { gain: 0.6 }));
       }),
@@ -7608,11 +7628,12 @@ void main() {
           ze("raptor_death", { pos: ge, gain: 1.15, jitter: 0 });
           return;
         }
-        if (pe === "hound" && i.campaign) {
+        if (pe === "ankylosaurus" && i.campaign) {
           if (he.size !== 1) ze("ankylo_death", { pos: ge, gain: 1.25, jitter: 0 });
           return;
         }
-        ze(pe === "hound" ? "hound_die" : "gull_die", {
+        if (pe !== "ankylosaurus") return;
+        ze("ankylosaurus_die", {
             pos: ge,
             gain: 1,
             jitter: 0.05,
@@ -7702,7 +7723,10 @@ void main() {
       ignite: { name: "spino_beam_start", gain: 1.95, ref: 28 },
       tail: { name: "spino_beam_tail", gain: 1.3 },
     };
+    ln("arena:music", ({ track, gain }) => arenaMusic?.select(track, gain));
     ln("spino:audio", ({ cue, pos, variant }) => {
+      if (cue === "charge") spinoCharging = true;
+      else if (cue === "ignite" || cue === "tail" || cue === "stop") spinoCharging = false;
       if (cue === "stop") {
         stopSpinoBeam();
         const now = e.currentTime;
@@ -7750,6 +7774,8 @@ void main() {
           ((Y = 0), (Z = 0), ya());
           for (let pe of [...pn.keys()]) pe.alive === !1 && Rs(pe);
         }
+        if (ee === "title") arenaMusic?.select("ambient");
+        else if (ee === "dead" || ee === "complete") arenaMusic?.select(null);
         (ee === "complete" && Zo(),
           ee === "paused" ? (ue = !0) : he === "paused" && (ue = !1));
       }));
@@ -7776,6 +7802,7 @@ void main() {
     }
     function lu(te) {
       te = Math.min(Math.max(+te || 0, 0), 0.25);
+      arenaMusic?.mix(!!handlerVoice || spinoCharging);
       const player = i.player;
       setPlayerBreath(ee === "playing" && player?.alive && player.enabled
         ? player.sprinting && player.speed > 2
@@ -7870,7 +7897,7 @@ void main() {
       if (
         ((L += (ct - L) * ye(2)),
         (J += (1 - J) * ye(3.5)),
-        (O.gain.value = J * (ue ? 0.45 : 1)),
+        (O.gain.value = J * (ue ? 0.45 : 1) * (arenaMusic?.playing || ee === "title" || ee === "complete" ? 0 : 1)),
         Xe.on)
       ) {
         let De = we(L),
@@ -7906,9 +7933,7 @@ void main() {
         ke = new Float32Array(16);
       ((ke[0] = ke[5] = ke[10] = ke[15] = 1), (ke[13] = 1.7));
       let Ue = [
-          { type: "gull", alive: !0, pos: { x: 6, y: 4, z: -9 } },
-          { type: "hound", alive: !0, pos: { x: -8, y: 0, z: -14 } },
-          { type: "gull", alive: !0, pos: { x: 0, y: 5, z: -30 } },
+          { type: "ankylosaurus", alive: !0, pos: { x: -8, y: 0, z: -14 } },
         ],
         ct = { min: { x: -99, y: -9, z: -99 }, max: { x: 99, y: 99, z: 99 } },
         De = {
@@ -7958,20 +7983,14 @@ void main() {
                 pos: { x: 0.6, y: 0, z: 0.2 },
                 surface: "concrete",
               })),
-            Tt % 13 === 0 &&
+            Tt % 17 === 0 &&
               Le.emit("enemy:fire", {
                 enemy: Ue[0],
                 pos: Ue[0].pos,
-                type: "gull",
-              }),
-            Tt % 17 === 0 &&
-              Le.emit("enemy:fire", {
-                enemy: Ue[1],
-                pos: Ue[1].pos,
-                type: "hound",
+                type: "ankylosaurus",
               }),
             Tt % 25 === 0 &&
-              Le.emit("enemy:step", { pos: Ue[1].pos, type: "hound" })),
+              Le.emit("enemy:step", { pos: Ue[0].pos, type: "ankylosaurus" })),
             Tt === 300 &&
               Le.emit("explosion", { pos: { x: 3, y: 0, z: -5 }, size: 1.5 }),
             Tt === 350 && Le.emit("player:hit", { amount: 20 }),
@@ -7980,7 +7999,7 @@ void main() {
               Le.emit("enemy:killed", {
                 enemy: Ue[0],
                 pos: Ue[0].pos,
-                type: "gull",
+                type: "ankylosaurus",
               })),
             Tt === 400 &&
               (Le.emit("objective:done", { id: "A", index: 0, total: 3 }),
@@ -8046,6 +8065,7 @@ void main() {
         },
         setPaused(te) {
           ue = !!te;
+          arenaMusic?.pause(ue);
           if (!ue) resumeHandlerVoice();
           else if (handlerVoice?.source) {
             handlerVoice.offset += e.currentTime - handlerVoice.started;

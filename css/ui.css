@@ -343,3 +343,37 @@ kbd { display: inline-block; font: 500 10px/1 var(--f-mono); color: var(--bone);
   position: absolute; top: calc(78px + var(--sat)); left: 50%; transform: translateX(-50%);
   padding: 4px 10px; color: var(--bone); background: var(--plate); font: 600 14px var(--f-label);
 }
+
+/* Ashfall loading screen */
+#boot.ashfall-boot {
+  justify-content: flex-end;
+  padding-bottom: max(36px, 8vh, env(safe-area-inset-bottom, 0px));
+  background: #170e0b;
+  isolation: isolate;
+}
+.ashfall-boot .boot-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  z-index: -2;
+  color: var(--bone);
+  font-family: var(--f-display);
+  font-size: clamp(34px, 8vw, 96px);
+  text-align: center;
+}
+#boot.ashfall-boot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(9, 6, 5, .96), transparent 46%);
+  z-index: -1;
+}
+.ashfall-boot .boot-sub { color: #fff1dc; text-shadow: 0 1px 5px #000; }
+.ashfall-boot .boot-bar { width: min(400px, 72vw); height: 3px; background: rgba(255, 239, 218, .28); }
+.ashfall-boot .boot-bar i { background: #ffad55; }
+@media (max-aspect-ratio: 1/1) {
+  .ashfall-boot .boot-art { object-fit: contain; object-position: center; }
+}

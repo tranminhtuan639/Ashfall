@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Ghép css/ + js/ + data/ lại thành 1 file HTML duy nhất.
 
-    python3 build.py            -> dist/saltline-stadium.html
+    python3 build.py            -> dist/index.html
     python3 build.py out.html   -> file tuỳ chọn
 
 Các file trong js/ là các MẢNH của cùng một IIFE (chung scope, tên biến đã bị
@@ -10,7 +10,7 @@ minify), nên phải ghép đúng thứ tự tên file (00, 10, 20 ...). Không 
 import sys, pathlib
 
 root = pathlib.Path(__file__).parent
-out = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / "dist" / "saltline-stadium.html"
+out = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / "dist" / "index.html"
 
 read = lambda p: (root / p).read_text(encoding="utf-8")
 

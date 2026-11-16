@@ -1,61 +1,67 @@
-# Saltline — bản tách file
+# Ashfall
 
-Build lại thành 1 file HTML:  `python3 build.py`  ->  `dist/saltline-stadium.html`
-Có thể mở trực tiếp `dist/saltline-stadium.html` bằng trình duyệt hỗ trợ WebGL.
+Ashfall is a single-player 3D first-person shooter set in an ash-covered Roman arena. Fight mechanized dinosaurs with an AK-47, resupply between firefights, and deploy automated sentries to cover multiple approaches.
 
-## Cấu trúc
-- `index.template.html`  khung HTML, có 2 chỗ `{{CSS}}` và `{{JS}}`
-- `css/ui.css`           toàn bộ CSS (HUD, menu, touch...)
-- `data/akGold.json`     model súng AK dạng base64 (4MB, ĐỪNG mở bằng editor)
-- `js/*.js`              các mảnh của 1 IIFE, ghép theo thứ tự tên file
+*Based on Saltline by Felix Rieseberg.*
 
-| file | nội dung (dòng ~) |
-|---|---|
-| 00-prelude | helper `defineProperty` của esbuild |
-| 10-three-r180 | three.js r180 (vendor, không sửa) — 34.9k dòng |
-| 20-core | config sân, event bus, RNG, hàm math |
-| 30-render-sky-post | renderer, shader trời, post-process (bloom, grade, grain) |
-| 40-materials | vật liệu procedural (asphalt, concrete, rust, wood...) |
-| 50-props-colliders | container, palette sơn, collider, props |
-| 60-level-structures | cầu thang, catwalk, reefer, level static/dynamic |
-| 61-colosseum | **MAP MỚI**: `buildColosseum()` + bảng `COLOSSEUM` (kích thước, số bậc, cổng...) |
-| 70-harbor-crane-ship | cần cẩu, tàu, kết cấu thép |
-| 80-weather-rain | mưa, vũng nước, sấm |
-| 90-fx-gameplay | FX, đạn, decal, enemy/objective/input |
-| A0-weapon-hud | viewmodel súng + HUD |
-| B0-ai-director-audio | AI địch, spawn/wave, radio, audio |
-| C0-boot | khởi động, xử lý lỗi, vào game |
+## Story
 
-## Lưu ý
-- Tên biến bị minify (`W`, `Pi`, `Ae`...) và các file chung 1 scope nên KHÔNG import/export được.
-  Sửa thoải mái trong từng file, miễn đừng đổi tên biến dùng chéo giữa các file.
-- Tên file module là tao đặt theo nội dung, có thể lệch chút ở ranh giới.
+A fire in the research facility beneath the Colosseum sends ash drifting into the arena. The facility goes silent, but its mechanized dinosaurs begin surfacing through the old service tunnels. You're sent in to recover the mission recorder from the last evacuation transport. You find the vehicle stranded in the center of the arena, its engine dead and its crew gone.
 
-## Map Colosseum
+Over the radio, your Handler talks you through restarting the transport while you hold off the machines. As the engine comes back online, the Handler picks up a command signal from the eastern tunnel. It's coming from the Spinosaurus, and every time it roars, more units answer. Bring it down, clear the arena, and get back to the transport before your way out is cut off.
 
-- Sàn elip 85 × 50 m. Trục X là chiều dài và trục Z là chiều rộng. Chỉnh kích thước và bậc thềm trong `COLOSSEUM` ở `js/61-colosseum.js`.
-- Người chơi xuất phát trong hầm nam. Khi đã vào sân, tường chắn di chuyển ở miệng hầm giữ người chơi trong lòng sân. Chơi lại mở đường vào sân từ đầu.
-- Khán đài gồm 28 đoạn và 20 tầng, với 430 khối bậc đá dùng chung một `InstancedMesh`. Các khoảng trống tạo hình phần khán đài sập. Va chạm di chuyển dùng tường bao. Tia đạn kiểm tra bề mặt đá được vẽ trong cảnh.
-- `data/colosseum-ruins.json` chứa một mảng vòm và tường đổ trích từ GLB, dùng tại hai vùng sập. Ba texture được thu xuống tối đa 1024 px và nén WebP. Build nhúng dữ liệu này vào HTML.
-- Hai cửa hông có điểm spawn mặt đất. Sau khi người chơi vào sân, một Ankylosaurus xuất hiện gần cửa hông đầu tiên và dùng AI Hound. Hạ con lớn, trụ súng nổ rồi hai con nhỏ xuất hiện. Hạ cả hai để thắng.
-- Kiểm tra chụp màn hình bằng `python3 shot.py /duong/dan/tuyet/doi/dist/saltline-stadium.html out.png "autostart=1&noaudio=1&q=low"` nếu đã cài Playwright và Chromium.
+## Play locally
 
-- Vùng khán đài sập: các bậc bị sập không còn biến mất hẳn mà tụt xuống 1-3 bậc (khoảng 20% biến mất hoàn toàn), dưới mỗi bậc có một lõi đá tối (`cores`, cùng `InstancedMesh`) nên không còn chỗ rỗng nhìn xuyên, và chân tường vòm kéo xuống 4 bậc để khớp với bậc thềm.
+Build the game with Python 3 from the project root:
 
-- Súng AK-Gold: băng đạn được đổi vật liệu cho khớp thân súng (độ bóng/kim loại và màu), xem khối `{ const m = magazine.material; ... }` trong `dm()` ở `js/A0-weapon-hud.js`. Trong code không có sẵn tay cầm trước nào nên chưa thêm.
+```sh
+python3 build.py
+```
 
-## Tay cầm trước AK-Gold
+On Windows, use `python build.py` if Python is installed as `python`. Open `dist/saltline-stadium.html` in a WebGL-capable browser and select **Play**. If you already have the built HTML file, open it directly.
 
-Model tay cầm vàng được giảm còn 9.199 tam giác. Texture WebP và hình học nằm trong `data/akGold-foregrip.json`. Bản HTML đã nhúng toàn bộ dữ liệu. Tay trái giữ tay cầm khi bắn và quay về tay cầm sau khi thay băng.
+## Controls
 
+| Input | Action |
+| --- | --- |
+| `W`, `A`, `S`, `D` | Move |
+| Mouse | Look around |
+| Left mouse button | Fire |
+| Right mouse button | Aim down sights |
+| `R` | Reload |
+| `E` | Refill reserve ammunition near an ammo crate |
+| `1` | Deploy a sentry at a valid location |
+| `2` | Interact with the transport to extract after the final fight |
+| `Esc` | Pause |
 
-## Ankylosaurus
+The main menu includes **Controls** for key bindings and **Intel** for enemy profiles.
 
-- `js/AF-ankylosaurus.js` dựng model từ hai GLB đã đóng gói vào `data/ankylosaurus.json`. Model dùng skeleton và hai clip Idle, Walk có sẵn. Đầu súng gắn theo điểm trên xương sống và xoay theo góc ngắm.
-- `js/B0-ai-director-audio.js` điều khiển AI, hitbox và bắn từ đầu nòng mới. Khi chết, model dùng chuyển động đổ từ AI Hound.
-- Texture đã thu xuống tối đa 1536 px cho thân và 1024 px cho súng, rồi chuyển sang WebP. Hình học gốc gồm 74.997 tam giác thân và 49.948 tam giác súng. Trận đấu có một con lớn ở pha đầu và hai con nhỏ ở pha sau.
-- Mở `dist/saltline-stadium.html` hoặc chạy `python build.py` để tạo lại bản HTML nhúng asset.
+## Campaign
 
-Ankylosaurus dùng tỉ lệ 6 lần so với bản tích hợp đầu tiên. Điểm xuất hiện dịch từ cửa hông vào trong sân và hitbox đạn tăng theo model. Lưới di chuyển dùng kích thước tìm đường cũ của Hound.
+The campaign spans four stages in one arena. You can deploy up to four sentries at once. Placing a fifth at a valid location replaces the oldest.
 
-Boss có 1.400 HP. Mỗi con nhỏ có 140 HP, kích thước bằng 1/6 boss và sát thương bằng 1/5 boss. Vụ nổ khi boss chết chỉ phát hiệu ứng hình ảnh. Hai con nhỏ xuất hiện sau 0,55 giây ở các điểm có đường tới người chơi.
+| Stage | Waves | Encounter |
+| --- | ---: | --- |
+| 1 | 4 | Defend the transport against Raptors that rush their targets and detonate at close range. |
+| 2 | 2 | Fight Raptors and turret-equipped Ankylosauruses. Larger Ankylosauruses can split into smaller units when defeated. |
+| 3 | 2 | Survive fire-breathing Giganotosauruses and their Ankylosaurus support, then face the purple Giganotosaurus. |
+| 4 | 2 | Clear a mixed wave, defeat the Spinosaurus and its reinforcements, then return to the transport to extract. |
+
+## Technical overview
+
+JavaScript handles input, combat, enemy AI, and campaign progression in the browser. Three.js renders the arena through WebGL, and the Web Audio API handles music and sound effects. Player settings are stored in `localStorage`. No backend, server-side API, or database is required.
+
+The build script bundles the HTML template, styles, scripts, and referenced assets into a single HTML file. The scripts in `js/` share a scope and are concatenated in filename order.
+
+| Path | Purpose |
+| --- | --- |
+| `build.py` | Builds the standalone HTML file |
+| `index.template.html`, `css/ui.css` | Page structure, menus, and HUD styles |
+| `js/61-colosseum.js` | Arena geometry and layout |
+| `js/A0-weapon-hud.js` | AK-47 and HUD logic |
+| `js/B5-campaign.js`, `js/B6-sentry.js` | Campaign progression and sentry behavior |
+| `data/` | Bundled models, animations, audio, and other asset data |
+
+## Credits
+
+Ashfall is based on [Saltline](https://claude.ai/artifact/BGY1SztrAYcJQHSsnHHGmp) by [Felix Rieseberg](https://github.com/felixrieseberg). Saltline provided the inspiration and starting codebase. Ashfall builds on that foundation with the Colosseum arena, a four-stage campaign, mechanized dinosaurs, and deployable sentries.
