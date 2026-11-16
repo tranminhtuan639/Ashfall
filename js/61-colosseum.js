@@ -43,8 +43,6 @@
       h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
       return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
     };
-    let seed = 7331;
-    const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
     // point on the ellipse (t) pushed `d` metres outward along the true normal, at height y
@@ -336,7 +334,7 @@
     // Arena cover, leaving the middle and the side-gate approaches open.
     const standingColumns = [[-17, 11, 4.2], [17, 13, 4.5], [19, -13, 4.1]];
     const newBrokenColumns = [[-22, -12, 4.1], [10, 17, 4.4], [25, 8, 4.3]];
-    const largeBrokenColumns = [[-33, 12, 4.2], [2, -15, 4.4], [36, -9, 4.3]];
+    const largeBrokenColumns = [[-33, 12, 4.2]];
     const intactColumns = [[-12, -17, 4.8], [12, -17, 4.8]];
     const fallenColumns = [[-9, 9, 4.7], [10, -8, 5.2]];
     const cover = new lt.Group();
@@ -452,32 +450,6 @@
       // const stand = Qi($e(0.7, 1.1, 0.7), steel); stand.position.set(bx, 0.55, bz); root.add(stand);
       // const fire = Qi($e(0.5, 0.45, 0.5), ember, { cast: false }); fire.position.set(bx, 1.35, bz); root.add(fire);
       const l = new lt.PointLight(0xff9a50, 120, 26, 2); l.position.set(bx, 2.1, bz); root.add(l);
-    }
-
-    // Small rubble stays at the edges of cover and has no collision.
-    {
-      const clusters = [
-        ...standingColumns.map(([x, z]) => [x, z, 1.5]),
-        ...fallenColumns.map(([x, z, length]) => [x + length / 2, z, .8]),
-      ];
-      const countPerCluster = 13;
-      const rub = new lt.InstancedMesh(new lt.IcosahedronGeometry(1, 0), stone,
-        clusters.length * countPerCluster);
-      const rock = new lt.Object3D();
-      let index = 0;
-      for (const [x, z, radius] of clusters) {
-        for (let i = 0; i < countPerCluster; i++) {
-          const angle = rnd() * TAU, distance = radius + rnd() * .8;
-          const size = .08 + rnd() ** 1.5 * .32;
-          rock.position.set(x + Math.cos(angle) * distance, size * .3, z + Math.sin(angle) * distance);
-          rock.scale.set(size, size * .65, size * (1 + rnd() * .55));
-          rock.rotation.set(rnd() * 2, angle, rnd() * 2);
-          rock.updateMatrix();
-          rub.setMatrixAt(index++, rock.matrix);
-        }
-      }
-      rub.castShadow = rub.receiveShadow = true;
-      root.add(rub);
     }
 
     game.scene.add(root);

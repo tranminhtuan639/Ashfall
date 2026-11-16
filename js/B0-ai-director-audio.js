@@ -1757,7 +1757,36 @@
     let e = document.getElementById("ui"),
       t = li("div", "hud");
     t.setAttribute("aria-hidden", "true");
-    const bossHealth = li("div", "h-boss-health", "<i></i>");
+    const bossHealth = li("div", "h-boss-health",
+      '<i class="boss-classic-fill"></i><div class="boss-split-track" hidden><div class="boss-half boss-left"><b></b></div><div class="boss-half boss-right"><b></b></div></div>');
+    const bossClassicFill = bossHealth.querySelector(".boss-classic-fill");
+    const bossSplitTrack = bossHealth.querySelector(".boss-split-track");
+    const bossLeftFill = bossHealth.querySelector(".boss-left b");
+    const bossRightFill = bossHealth.querySelector(".boss-right b");
+    const bossStyles = li("style", "", `
+      .h-boss-health.boss-split { position: absolute; top: calc(76px + var(--sat, 0px)); left: 50%; transform: translateX(-50%); width: min(460px, 76vw); height: 10px; border: 1px solid #c3b0cf66; background: #160d20e8; overflow: visible; }
+      .h-boss-health.boss-split[hidden] { display: none; }
+      .h-boss-health .boss-split-track { position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 100%; min-height: 7px; }
+      .h-boss-health .boss-split-track[hidden], .h-boss-health .boss-classic-fill[hidden] { display: none; }
+      .boss-split-track::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #fff3; }
+      .boss-half { position: relative; min-width: 0; }
+      .boss-half b { display: block; position: absolute; inset: 0; transition: transform .13s linear; }
+      .boss-left b { transform-origin: right; background: linear-gradient(90deg, #572789, #a459ea); }
+      .boss-right b { transform-origin: left; background: linear-gradient(90deg, #ffdc60, #d58d21); }
+      .boss-spino .boss-half b { background: linear-gradient(#eac8ff, #b66eff 40%, #8843d1); }
+      .boss-spino .boss-half::after { content: ""; position: absolute; inset: -1px 0; pointer-events: none; border: 1px solid; }
+      .boss-spino .boss-left::after { border-color: #bf73ff9c; border-right: 0; box-shadow: 0 0 5px #b353f770; animation: boss-fire-edge 2.1s ease-in-out infinite alternate; }
+      .boss-spino .boss-right::after { border-color: #ffd960a0; border-left: 0; box-shadow: 0 0 5px #ffc94766; animation: boss-electric-edge 2.4s ease-in-out infinite alternate; }
+      .boss-spino .boss-split-track::after { display: none; }
+      .boss-spino .boss-half::before { content: ""; position: absolute; left: 8%; right: 8%; top: -4px; height: 5px; pointer-events: none; z-index: 1; }
+      .boss-spino .boss-left::before { background: radial-gradient(ellipse at bottom, #cd73ffbf, transparent 66%) 0 0 / 15px 100% repeat-x; animation: boss-flame-flicker 1.5s ease-in-out infinite alternate; }
+      .boss-spino .boss-right::before { background: linear-gradient(90deg, transparent, #ffe077be 36%, #fff4b3, transparent); clip-path: polygon(0 68%, 18% 38%, 25% 72%, 44% 5%, 51% 49%, 64% 22%, 73% 75%, 100% 48%, 73% 96%, 63% 52%, 50% 78%, 43% 38%, 26% 100%, 17% 63%); animation: boss-electric-edge 2.4s ease-in-out infinite alternate; }
+      @keyframes boss-flame-flicker { from { opacity: .32; transform: scaleY(.65); } to { opacity: .65; transform: scaleY(1); } }
+      @keyframes boss-fire-edge { from { opacity: .57; } to { opacity: .95; } }
+      @keyframes boss-electric-edge { 0%, 82% { opacity: .57; } 100% { opacity: .93; } }
+      @media (prefers-reduced-motion: reduce) { .boss-spino .boss-half::before, .boss-spino .boss-half::after { animation: none; } }
+    `);
+    e.appendChild(bossStyles);
     const transportHealth = li("div", "h-transport-health",
       '<span>Transport</span><div style="height:9px;background:#132334;border:1px solid #7396ad;margin-top:4px"><i style="display:block;height:100%;background:#32a6ee;transform-origin:left"></i></div>');
     transportHealth.style.width = "min(360px, 65vw)";
@@ -1954,7 +1983,15 @@
       },
       setBossHealth(value) {
         bossHealth.hidden = value == null;
-        if (value != null) bossHealth.firstElementChild.style.transform = "scaleX(" + value + ")";
+        const split = value != null && typeof value === "object";
+        bossHealth.classList.toggle("boss-split", split);
+        bossHealth.classList.toggle("boss-spino", split && value.variant === "spino");
+        bossClassicFill.hidden = split;
+        bossSplitTrack.hidden = !split;
+        if (split) {
+          bossLeftFill.style.transform = "scaleX(" + Math.max(0, Math.min(1, value.left)) + ")";
+          bossRightFill.style.transform = "scaleX(" + Math.max(0, Math.min(1, value.right)) + ")";
+        } else if (value != null) bossClassicFill.style.transform = "scaleX(" + value + ")";
       },
       setTransportHealth(value) {
         transportHealth.hidden = value == null;
@@ -2317,8 +2354,13 @@
     }
     return (R(), I);
   }
+  const ASHFALL_DIFFICULTY = {
+    easy: { sentryLimit: 8, enemyHealth: .55 },
+    medium: { sentryLimit: 6, enemyHealth: .8 },
+    hard: { sentryLimit: 4, enemyHealth: 1 },
+  };
   var fM = "saltline.settings.v1",
-    XC = { quality: "auto", sens: 1, invertY: !1, volume: 0.8, fov: Pi.fov },
+    XC = { difficulty: "hard", quality: "auto", sens: 1, invertY: !1, volume: 0.8, fov: Pi.fov },
     dM = ["low", "medium", "high", "ultra"];
   function YC() {
     let i = { ...XC };
@@ -2326,7 +2368,8 @@
       let e = JSON.parse(localStorage.getItem(fM) || "null");
       e &&
         typeof e == "object" &&
-        ((e.quality === "auto" || dM.includes(e.quality)) &&
+        (Object.hasOwn(ASHFALL_DIFFICULTY, e.difficulty) && (i.difficulty = e.difficulty),
+        (e.quality === "auto" || dM.includes(e.quality)) &&
           (i.quality = e.quality),
         Number.isFinite(e.sens) &&
           (i.sens = Math.min(3, Math.max(0.2, e.sens))),
@@ -2353,7 +2396,7 @@
     <div><dt>Sprint</dt><dd><kbd>Shift</kbd></dd></div>
     <div><dt>Crouch</dt><dd><kbd>C</kbd> or <kbd>Ctrl</kbd></dd></div>
     <div><dt>Melee</dt><dd><kbd>F</kbd></dd></div>
-    <div><dt>Deploy sentry (max 4)</dt><dd><kbd>1</kbd></dd></div>
+    <div><dt>Deploy sentry</dt><dd><kbd>1</kbd></dd></div>
     <div><dt>Resupply at an ammo crate</dt><dd><kbd>E</kbd></dd></div>
     <div><dt>Extract at the transport when cleared</dt><dd><kbd>2</kbd></dd></div>
     <div><dt>Pause</dt><dd><kbd>Esc</kbd> or <kbd>P</kbd></dd></div>
@@ -2435,6 +2478,12 @@
         <button class="btn small" data-act="close-panel">Close</button>
       </header>
       <div class="panel-b" data-pane="settings">
+        <div class="row"><label id="l-difficulty">Difficulty</label>
+          <div class="seg" role="group" aria-labelledby="l-difficulty">
+            ${Object.keys(ASHFALL_DIFFICULTY).map(level => `<button data-difficulty="${level}" aria-pressed="false">${level[0].toUpperCase() + level.slice(1)}</button>`).join("")}
+          </div>
+        </div>
+        <p class="panel-note" data-f="difficulty-note" aria-live="polite"></p>
         <div class="row"><label id="l-q">Graphics quality</label>
           <div class="seg" role="group" aria-labelledby="l-q">${dM.map((U) => `<button data-q="${U}" aria-pressed="false">${U}</button>`).join("")}</div></div>
         <div class="row"><label for="s-sens">Mouse sensitivity</label><div class="slider"><input id="s-sens" type="range" min="0.2" max="3" step="0.05"><output data-o="sens"></output></div></div>
@@ -2520,8 +2569,13 @@
     }
     function g() {
       let U = n.quality === "auto" ? i.quality && i.quality.name : n.quality;
-      for (let D of r(".seg button"))
+      for (let D of r("[data-q]"))
         D.setAttribute("aria-pressed", String(D.dataset.q === U));
+      for (const button of r("[data-difficulty]")) {
+        button.setAttribute("aria-pressed", String(button.dataset.difficulty === n.difficulty));
+      }
+      const difficulty = ASHFALL_DIFFICULTY[n.difficulty];
+      c("difficulty-note").textContent = `Max ${difficulty.sentryLimit} sentries · Enemy HP ${Math.round(difficulty.enemyHealth * 100)}% · Applies when a run starts`;
       ((u.value = n.sens),
         (h.value = Math.round(n.volume * 100)),
         (f.value = n.fov),
@@ -2611,6 +2665,12 @@
       if (!T || !s.contains(T)) return;
       if ((i.events.emit("ui:click", {}), T.dataset.q)) {
         ((n.quality = T.dataset.q), v("quality"), g(), Wf(n));
+        return;
+      }
+      if (Object.hasOwn(ASHFALL_DIFFICULTY, T.dataset.difficulty)) {
+        n.difficulty = T.dataset.difficulty;
+        g();
+        Wf(n);
         return;
       }
       if (T.dataset.tab) {
@@ -2738,16 +2798,8 @@
       "NORTH-WEST",
     ],
     _l = {
-      intro:
-        "Private, this is Handler. Move into the arena and secure the transport.",
-      contact: "It has seen you. Gulls fly, Ankylosauruss walk. Put them down.",
-      cut: [
-        "One relay dark. It felt that \u2014 machines inbound.",
-        "Two dark. It is throwing everything it has left at you.",
-      ],
-      all: "All three dark. The boat is holding at the quay ladder, south end. Run.",
-      low: "You are hit hard. Get behind steel and breathe.",
-      done: "Breacher is aboard. Mission complete. Good work.",
+      intro: "Private, this is Handler. Move into the arena and secure the transport.",
+      low: "Run for your life, private, RUN FOR IT!",
     };
   function mM(i) {
     let e = (i.render && i.render.post) || {},
@@ -2790,19 +2842,10 @@
     let c = {
         time: 0,
         retries: 0,
-        relays: [],
-        cut: 0,
-        allCut: !1,
-        queue: [],
-        waveHot: 0,
         alertT: 0,
-        pursuitT: 0,
-        pursuitLeft: 0,
-        contactSaid: !1,
-        lowSaid: !1,
-        extractHint: 0,
+        wasLow: false,
+        nextLowWarning: 0,
         intensity: 0.15,
-        used: new Map(),
       },
       u = 0,
       h = Yi.introSeconds,
@@ -2815,7 +2858,6 @@
       y = 0.8,
       b = new W(),
       m = new W(),
-      A = () => [],
       _ = {
         state: "title",
         flow: Yi,
@@ -2831,10 +2873,6 @@
           j(!1);
         },
         update: B,
-        debugCut() {
-          let P = c.relays.find((V) => !V.cut);
-          P && me(P);
-        },
       };
     function M(P) {
       let V = _.state;
@@ -2850,7 +2888,7 @@
       r.setGameplay?.(false);
       r.exitLock();
       n.enabled = false;
-      l.setDead({ time: c.time, relays: 0, total: 0, reason: "The transport was destroyed" });
+      l.setDead({ time: c.time, reason: "The transport was destroyed" });
       M("dead");
     });
     let E = { pos: [], look: [], len: 1, t: 0 };
@@ -2919,78 +2957,22 @@
         (e.fade = Math.max(1 - sl(0, 1.8, E.t), sl(V - 1.6, V, E.t))));
     }
     function H() {
+      i.runDifficulty = ASHFALL_DIFFICULTY[l.settings.difficulty];
       (a(i.enemies, "clear"),
         a(i.fx, "clear"),
         a(i.combat, "reset"),
         a(i.weapon, "reset"),
         (c.time = 0),
-        (c.cut = 0),
-        (c.allCut = !1),
-        (c.queue.length = 0),
-        (c.waveHot = 0),
         (c.alertT = 0),
-        (c.pursuitT = 0),
-        (c.pursuitLeft = 0),
-        (c.contactSaid = !1),
-        (c.lowSaid = !1),
-        (c.extractHint = 0),
-        c.used.clear(),
-        (c.relays = A().map((P, V) => {
-          let Y = (/([a-z0-9])$/i.exec(String(P.id || "")) || [
-            0,
-            String.fromCharCode(65 + V),
-          ])[1].toUpperCase();
-          return (
-            O(P, "live"),
-            {
-              o: P,
-              id: P.id || "relay_" + V,
-              short: Y,
-              t: 0,
-              cut: !1,
-              cutting: !1,
-            }
-          );
-        })),
+        (c.wasLow = false),
+        (c.nextLowWarning = 0),
         s.resetArenaEntry?.(),
         n.reset(s.playerStart),
         o.reset && o.reset(),
         (e.saturation = t),
-        (e.flash = 0),
-        q(),
-        o.setRelays && o.setRelays(0, c.relays.length));
+        (e.flash = 0));
       sentries.reset();
       campaign.reset();
-    }
-    function O(P, V) {
-      try {
-        let Y = P && P.object && P.object.userData;
-        Y && typeof Y.setState == "function" && Y.setState(V);
-      } catch (Y) {
-        console.error("[game] relay setState threw", Y);
-      }
-    }
-    function q() {
-      if (!o.setMarkers) return;
-      let P = c.relays
-        .filter((V) => !V.cut)
-        .map((V) => ({
-          id: V.id,
-          short: V.short,
-          label: V.o.label || "Relay " + V.short,
-          pos: V.o.pos,
-          kind: "relay",
-        }));
-      (c.allCut &&
-        s.extraction &&
-        P.push({
-          id: "extract",
-          short: "EX",
-          label: "Boat",
-          pos: s.extraction.pos,
-          kind: "extract",
-        }),
-        o.setMarkers(P));
     }
     function U({ skipIntro: P = !0, quick: V = !1, keepRetries: Y = !1 } = {}) {
       if (
@@ -3023,15 +3005,6 @@
         C(!0),
         o.setObjective("Enter the arena"),
         M("playing"));
-    }
-    function D() {
-      if (c.allCut) return "Get to the boat";
-      let P = c.relays.length - c.cut;
-      return c.cut === 0
-        ? "Cut the three uplink relays"
-        : P === 1
-          ? "Cut the last relay"
-          : `Cut the remaining ${P} relays`;
     }
     function C(P) {
       let V = r.describeMode ? r.describeMode() : "";
@@ -3121,84 +3094,7 @@
     }),
       i.events.on("player:hit", () => {
         c.alertT = Math.max(c.alertT, 8);
-      }),
-      i.events.on("player:rescued", () => {
-        _.state === "playing" && o.message("Hauled out of the water", 2.5);
       }));
-    function $() {
-      let P = null,
-        V = Yi.interactRange;
-      for (let Y of c.relays) {
-        if (Y.cut) continue;
-        let L = Y.o.pos.x - n.pos.x,
-          Z = Y.o.pos.z - n.pos.z,
-          J = Math.hypot(L, Z);
-        J > V ||
-          Math.abs((Y.o.pos.y || 0) - n.pos.y) > 2.5 ||
-          (J > 0.9 &&
-            (L * n.forward.x + Z * n.forward.z) /
-              (J * Math.max(0.2, Math.hypot(n.forward.x, n.forward.z))) <
-              Yi.interactFacing) ||
-          ((P = Y), (V = J));
-      }
-      return P;
-    }
-    function ue(P) {
-      let V = n.alive ? $() : null;
-      for (let L of c.relays)
-        L.cut ||
-          (L === V && r.down("interact")
-            ? (L.cutting || ((L.cutting = !0), O(L.o, "cutting")),
-              (L.t += P / Yi.cutSeconds),
-              i.events.emit("objective:progress", {
-                id: L.id,
-                t: Math.min(1, L.t),
-              }),
-              L.t >= 1 && me(L))
-            : L.t > 0 &&
-              ((L.t = Math.max(0, L.t - P * 1.6)),
-              L.cutting &&
-                ((L.cutting = !1),
-                O(L.o, "live"),
-                i.events.emit("objective:progress", { id: L.id, t: 0 }))));
-      V && !V.cut
-        ? o.setPrompt && o.setPrompt("Cut relay " + V.short, Fo(V.t))
-        : o.setPrompt && o.setPrompt(null);
-      let Y = s.extraction;
-      if (Y && Y.pos) {
-        let L = Math.hypot(Y.pos.x - n.pos.x, Y.pos.z - n.pos.z),
-          Z = L < (Y.radius || 2.5) && Math.abs(Y.pos.y - n.pos.y) < 3.5;
-        (Z && c.allCut && n.alive
-          ? ee()
-          : Z &&
-            !c.allCut &&
-            c.extractHint <= 0 &&
-            ((c.extractHint = 8),
-            o.message(
-              "Relays still live \u2014 the boat will not wait under fire",
-              3.5,
-            )),
-          (c.extractHint = Math.max(0, c.extractHint - P)));
-      }
-    }
-    function me(P) {
-      ((P.cut = !0), (P.cutting = !1), (P.t = 1), c.cut++, O(P.o, "cut"));
-      let V = c.relays.length;
-      (i.events.emit("objective:done", { id: P.id, index: c.cut, total: V }),
-        o.setRelays && o.setRelays(c.cut, V),
-        o.setPrompt && o.setPrompt(null),
-        n.addShake(0.18),
-        c.cut >= V
-          ? ((c.allCut = !0),
-            (c.pursuitLeft = Yi.pursuitExtra),
-            (c.pursuitT = 12),
-            i.events.emit("objective:all", {}),
-            o.radio && o.radio(_l.all, 4.5))
-          : o.radio &&
-            o.radio(_l.cut[Math.min(c.cut - 1, _l.cut.length - 1)], 3.6),
-        o.setObjective(D()),
-        q());
-    }
     i.events.on("player:dead", () => {
       (_.state !== "playing" && _.state !== "paused") ||
         (r.setGameplay && r.setGameplay(!1),
@@ -3206,7 +3102,7 @@
         o.setPrompt && o.setPrompt(null),
         o.show(!1),
         o.clearRadio && o.clearRadio(),
-        l.setDead({ time: c.time, relays: c.cut, total: c.relays.length }),
+        l.setDead({ time: c.time }),
         M("dead"));
     });
     function ee() {
@@ -3244,7 +3140,7 @@
             !p && u > 1.3 && ((p = !0), o.radio && o.radio(_l.intro, 4.2)),
             u > h - 0.6 &&
               !o.root?.classList.contains("on") &&
-              (o.show(!0), o.setObjective(D())),
+              (o.show(!0), o.setObjective("Enter the arena")),
             u >= h && (l.locationCard(!1), (e.fade = 0), T()),
             !0
           );
@@ -3262,17 +3158,13 @@
           }
           c.alertT = Math.max(0, c.alertT - P);
           let V = ne();
-          c.waveHot > 0 &&
-            V === 0 &&
-            !c.queue.length &&
-            c.waveHot < 24 &&
-            (c.waveHot = 0);
-          let Y =
-            c.allCut || c.queue.length || (c.waveHot > 0 && V > 0)
-              ? 1
-              : c.alertT > 0 || (V > 0 && re(26))
-                ? 0.6
-                : 0.15;
+          const Y = c.alertT > 0 || (V > 0 && re(26)) ? 0.6 : 0.15;
+          const low = n.alive && n.health < 30;
+          if (low && !c.wasLow && c.time >= c.nextLowWarning) {
+            c.nextLowWarning = c.time + 15;
+            o.radio?.(_l.low, 4.6, "lowHealth");
+          }
+          c.wasLow = low;
           return (
             Y !== c.intensity &&
               ((c.intensity = Y), a(i.audio, "setIntensity", Y)),
@@ -3284,10 +3176,6 @@
               ? ((y -= P),
                 y <= 0 && ((y = 2), o.message(r.describeMode(), 2.6)))
               : (y = 0.8),
-            !c.lowSaid &&
-              n.alive &&
-              n.health < 30 &&
-              ((c.lowSaid = !0), o.radio && o.radio(_l.low, 3)),
             !0
           );
         }
@@ -3331,7 +3219,6 @@
   var gM = {
     mats: qg,
     level: cv,
-    backdrop: mv,
     ground: vv,
     fx: Sv,
     weapon: Xv,

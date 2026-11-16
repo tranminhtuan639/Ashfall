@@ -27,6 +27,15 @@
     shake: 0.035,                      // rung camera khi bắn (giảm theo khoảng cách)
   };
 
+  const SPINO_BEAM_YELLOW = {
+    ...SPINO_BEAM,
+    coreColor: [1, .89, .36], coreHot: [1, .98, .77],
+    plasmaColor: [1, .56, .04], plasmaHot: [1, .9, .32],
+    glowColor: [.95, .32, .01], glowHot: [1, .7, .06],
+    boltColor: [1, .76, .13], boltHot: [1, .98, .65],
+    accent: [1, .7, .12], discColor: [1, .55, .05], ringColor: [1, .86, .31],
+  };
+
   const BEAM_NOISE_GLSL = `
     float h31(vec3 p){ p = fract(p * .3183099 + .1); p *= 17.; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
     float vnoise(vec3 x){
@@ -37,9 +46,10 @@
     float fbm(vec3 p){ float a = .5, s = 0.; for (int i = 0; i < 4; i++){ s += a * vnoise(p); p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= .5; } return s; }
   `;
 
-  function createSpinoBeamFx(game) {
-    const cfg = SPINO_BEAM;
+  function createSpinoBeamFx(game, yellow = false, boltsOnly = false) {
+    const cfg = yellow ? SPINO_BEAM_YELLOW : SPINO_BEAM;
     const V3 = (a) => new lt.Vector3(a[0], a[1], a[2]);
+    const glslColor = color => "vec3(" + color.map(value => value.toFixed(3)).join(",") + ")";
     const U = { uTime: { value: 0 }, uLen: { value: 30 }, uEnd: { value: 0 } };
     const root = new lt.Group();
     root.name = "spino-beam-fx";
@@ -196,7 +206,7 @@
         void main(){ float nv = abs(dot(normalize(vN), normalize(vV))); float rim = pow(1. - nv, 2.2);
           float n = fbm(vO * 2.4 + vec3(0., uTime * 5., uTime * 2.)); float n2 = fbm(vO * 5.5 - vec3(uTime * 7., 0., uTime * 3.));
           float heat = .25 + .8 * n + .45 * n2 + 1.0 * pow(nv, 2.) + .35 * rim;
-          vec3 col = mix(vec3(.5, .13, 1.), vec3(1., .88, 1.), smoothstep(.95, 2.1, heat));
+          vec3 col = mix(${glslColor(cfg.plasmaColor)}, ${glslColor(cfg.coreHot)}, smoothstep(.95, 2.1, heat));
           gl_FragColor = vec4(col * heat * uInt, 1.); }`,
       side: lt.FrontSide, ...additive,
     })), 25);
@@ -213,7 +223,7 @@
     const inflow = add(new lt.Points(pointGeo, new lt.ShaderMaterial({
       uniforms: { uSize: { value: 1 } },
       vertexShader: "attribute float aFade; varying float vF; uniform float uSize; void main(){ vF = aFade; vec4 mv = viewMatrix * vec4(position, 1.); gl_PointSize = uSize * aFade * 420. / max(-mv.z, .5); gl_Position = projectionMatrix * mv; }",
-      fragmentShader: "varying float vF; void main(){ vec2 p = gl_PointCoord - .5; float d = length(p) * 2.; if (d > 1.) discard; float a = pow(1. - d, 2.); gl_FragColor = vec4(vec3(.78, .38, 1.) * a * vF * 5., 1.); }",
+      fragmentShader: `varying float vF; void main(){ vec2 p = gl_PointCoord - .5; float d = length(p) * 2.; if (d > 1.) discard; float a = pow(1. - d, 2.); gl_FragColor = vec4(${glslColor(cfg.accent)} * a * vF * 5., 1.); }`,
       ...additive,
     })), 24);
 
@@ -237,7 +247,7 @@
       ball.visible = flareMouth.visible = inflow.visible = bolts.visible = true;
       ball.position.copy(mouth); ball.scale.setScalar(r);
       ball.material.uniforms.uInt.value = .6 + .8 * p;
-      game.fx?.beamCharge?.(mouth, p, { dt, radius: r });
+      game.fx?.beamCharge?.(mouth, p, { dt, radius: r, yellow });
       flareMouth.material.uniforms.uInt.value = (.5 + 1.5 * p) * cfg.intensity;
       billboard(flareMouth, mouth, r * (5 + 4 * p));
       // hạt hút vào miệng
@@ -255,7 +265,7 @@
         lookDir(m, mouth, aim);
         m.rotateZ(clock * (k ? -5.5 : 4));
         m.scale.setScalar((2.6 - 1.2 * p) * (k ? 1.35 : 1) * Math.max(.6, r));
-        m.material.color.setRGB(2.2 * (.4 + p), .8 * (.4 + p), 3.4 * (.4 + p));
+        m.material.color.setRGB(...cfg.accent.map(channel => channel * 3.4 * (.4 + p)));
       });
       // sét ngắn nhảy quanh cầu
       regen += dt;
@@ -283,37 +293,39 @@
       const L = Math.max(.1, length), pulse = 1 + .1 * Math.sin(clock * 115);
       U.uLen.value = L;
       U.uEnd.value = hit ? 0 : 1;
-      core.visible = plasma.visible = glow.visible = true;
-      inflow.visible = ringMeshes[0].visible = ringMeshes[1].visible = false;
-      const place = (mesh, radius) => {
-        mesh.position.copy(mouth).addScaledVector(dir, L / 2);
-        mesh.quaternion.setFromUnitVectors(Yup, dir);
-        mesh.scale.set(radius * pulse, L, radius * pulse);
-      };
-      place(core, cfg.coreRadius); place(plasma, cfg.plasmaRadius); place(glow, cfg.glowRadius);
-      core.material.uniforms.uInt.value = BODY_INT.core * cfg.intensity;
-      plasma.material.uniforms.uInt.value = BODY_INT.plasma * cfg.intensity;
-      glow.material.uniforms.uInt.value = BODY_INT.glow * cfg.intensity;
-      // cầu + flare ở miệng
-      ball.visible = true; ball.position.copy(mouth); ball.scale.setScalar(1.3 * pulse); ball.material.uniforms.uInt.value = 1.15 * cfg.intensity;
-      flareMouth.visible = true; flareMouth.material.uniforms.uInt.value = (1.1 + .3 * Math.sin(clock * 60)) * cfg.intensity;
-      billboard(flareMouth, mouth, 7.5 * pulse);
-      // điểm chạm
       const hitting = !!hit;
-      flareHit.visible = hitDisc.visible = rings[0].visible = rings[1].visible = hitting;
-      if (hitting) {
-        const pt = hit.point || tmp.copy(mouth).addScaledVector(dir, L), n = hit.normal && hit.normal.isVector3 ? hit.normal : Yup;
-        tmp2.copy(pt).addScaledVector(n, .12);
-        flareHit.material.uniforms.uInt.value = (1.3 + .4 * Math.sin(clock * 70)) * cfg.intensity;
-        billboard(flareHit, tmp2.clone().addScaledVector(n, .5), 5.2 + .9 * Math.sin(clock * 50));
-        hitDisc.position.copy(tmp2); hitDisc.quaternion.setFromUnitVectors(Z, n); hitDisc.scale.setScalar(5.5 + .6 * Math.sin(clock * 33));
-        hitDisc.material.uniforms.uInt.value = 1.2 * cfg.intensity;
-        rings.forEach((m, k) => {
-          const u = (impactClock * 1.9 + k * .5) % 1;
-          m.position.copy(tmp2); m.quaternion.setFromUnitVectors(Z, n); m.scale.setScalar(18);
-          m.material.uniforms.uR.value = Math.max(.02, u); m.material.uniforms.uW.value = .06 + .08 * u;
-          m.material.uniforms.uInt.value = 2.2 * cfg.intensity;
-        });
+      if (!boltsOnly) {
+        core.visible = plasma.visible = glow.visible = true;
+        inflow.visible = ringMeshes[0].visible = ringMeshes[1].visible = false;
+        const place = (mesh, radius) => {
+          mesh.position.copy(mouth).addScaledVector(dir, L / 2);
+          mesh.quaternion.setFromUnitVectors(Yup, dir);
+          mesh.scale.set(radius * pulse, L, radius * pulse);
+        };
+        place(core, cfg.coreRadius); place(plasma, cfg.plasmaRadius); place(glow, cfg.glowRadius);
+        core.material.uniforms.uInt.value = BODY_INT.core * cfg.intensity;
+        plasma.material.uniforms.uInt.value = BODY_INT.plasma * cfg.intensity;
+        glow.material.uniforms.uInt.value = BODY_INT.glow * cfg.intensity;
+        // cầu + flare ở miệng
+        ball.visible = true; ball.position.copy(mouth); ball.scale.setScalar(1.3 * pulse); ball.material.uniforms.uInt.value = 1.15 * cfg.intensity;
+        flareMouth.visible = true; flareMouth.material.uniforms.uInt.value = (1.1 + .3 * Math.sin(clock * 60)) * cfg.intensity;
+        billboard(flareMouth, mouth, 7.5 * pulse);
+        // điểm chạm
+        flareHit.visible = hitDisc.visible = rings[0].visible = rings[1].visible = hitting;
+        if (hitting) {
+          const pt = hit.point || tmp.copy(mouth).addScaledVector(dir, L), n = hit.normal && hit.normal.isVector3 ? hit.normal : Yup;
+          tmp2.copy(pt).addScaledVector(n, .12);
+          flareHit.material.uniforms.uInt.value = (1.3 + .4 * Math.sin(clock * 70)) * cfg.intensity;
+          billboard(flareHit, tmp2.clone().addScaledVector(n, .5), 5.2 + .9 * Math.sin(clock * 50));
+          hitDisc.position.copy(tmp2); hitDisc.quaternion.setFromUnitVectors(Z, n); hitDisc.scale.setScalar(5.5 + .6 * Math.sin(clock * 33));
+          hitDisc.material.uniforms.uInt.value = 1.2 * cfg.intensity;
+          rings.forEach((m, k) => {
+            const u = (impactClock * 1.9 + k * .5) % 1;
+            m.position.copy(tmp2); m.quaternion.setFromUnitVectors(Z, n); m.scale.setScalar(18);
+            m.material.uniforms.uR.value = Math.max(.02, u); m.material.uniforms.uW.value = .06 + .08 * u;
+            m.material.uniforms.uInt.value = 2.2 * cfg.intensity;
+          });
+        }
       }
       // sét quấn quanh beam + nhánh tạt ra
       bolts.visible = true;
@@ -355,10 +367,34 @@
         boltGeo.attributes.position.needsUpdate = true; boltGeo.attributes.aInt.needsUpdate = true;
       }
       // hạt + đèn + vết cháy
-      game.fx?.beamJet?.(mouth, dir, { dt, length: L, scale: 1.8, hit: hit ? (hit.point || tmp.copy(mouth).addScaledVector(dir, L)) : null, normal: hit?.normal });
+      if (boltsOnly) return;
+      game.fx?.beamJet?.(mouth, dir, { dt, length: L, yellow, scale: 1.8, hit: hit ? (hit.point || tmp.copy(mouth).addScaledVector(dir, L)) : null, normal: hit?.normal });
       const d = camPos().distanceTo(mouth);
       game.player?.addShake?.(cfg.shake * Math.max(0, 1 - d / 70));
     }
 
-    return { charge, fire, hide, get firing() { return firing; } };
+    const forkStarts = [new lt.Vector3(), new lt.Vector3()];
+    function fan(mouth, arcs, dt) {
+      bolts.visible = true;
+      if (firing && (regen += dt) < .045) return;
+      firing = true;
+      regen = 0;
+      let index = 0;
+      for (const arc of arcs) {
+        if (mouth.distanceToSquared(arc.end) < .04) continue;
+        jag(mouth, arc.end, .85);
+        writeBolt(index++, .13, 1.85);
+        forkStarts[0].copy(pts[5]);
+        forkStarts[1].copy(pts[10]);
+        for (const forkStart of forkStarts) {
+          jag(forkStart, arc.end, 1.45);
+          writeBolt(index++, .07, 1.03);
+        }
+      }
+      for (let b = index; b < B; b++) hideBolt(b);
+      boltGeo.attributes.position.needsUpdate = true;
+      boltGeo.attributes.aInt.needsUpdate = true;
+    }
+
+    return { charge, fire, fan, hide, get firing() { return firing; } };
   }

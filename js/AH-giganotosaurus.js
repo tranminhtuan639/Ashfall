@@ -2,26 +2,65 @@
 
   const gigaPurpleColor = /*@inline:data/giga-purple-color.json*/ null;
 
-  const gigaBiteClip = /*@inline:data/giga-bite.json*/ null;
+  const gigaYellowColor = /*@inline:data/giga-yellow-color.json*/ null;
+  const gigaWalkRig = /*@inline:data/giga-walk-rig.json*/ null;
+  const gigaBiteRigData = /*@inline:data/giga-bite-rig.json*/ null;
+  const gigaWalkData = { ...gigaBiteRigData, ...gigaWalkRig };
+  const loadGigaYellowMaps = () => Promise.all([
+    akGoldTexture(gigaYellowColor.base, lt.SRGBColorSpace),
+    akGoldTexture(gigaYellowColor.emissive, lt.SRGBColorSpace),
+  ]);
+  const bossAnimationGeometries = new WeakMap();
+
+  function createBossAnimationRig(data, material) {
+    let geometry = bossAnimationGeometries.get(data);
+    if (!geometry) {
+      geometry = new lt.BufferGeometry();
+      const attr = (name, key, Type, size, normalized = false) => {
+        geometry.setAttribute(name, new lt.BufferAttribute(new Type(assetBytes(data[key])), size, normalized));
+      };
+      attr("position", "position", Float32Array, 3);
+      attr("normal", "normal", Int16Array, 3, true);
+      attr("uv", "uv", Uint16Array, 2, true);
+      attr("skinIndex", "joints", Uint16Array, 4);
+      attr("skinWeight", "weights", Uint16Array, 4, true);
+      geometry.setIndex(new lt.BufferAttribute(new Uint32Array(assetBytes(data.index)), 1));
+      bossAnimationGeometries.set(data, geometry);
+    }
+    const mesh = new lt.SkinnedMesh(geometry, material);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    return bindDefenseRig(data, mesh);
+  }
 
   async function setupGiganotosaurus(game, { reinforcement = false, assets } = {}) {
-    const [template, purpleMap] = await (assets || Promise.all([
+    const [template, purpleMap, [yellowMap, yellowEmissive]] = await (assets || Promise.all([
       loadDefenseMesh(giganotosaurusData, true),
       akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
+      loadGigaYellowMaps(),
     ]));
     const mesh = template.clone();
     mesh.material = template.material.clone();
     const originalMap = mesh.material.map;
     const normalSize = 13;
-    let purple = false;
+    let purple = false, yellow = false, giant = false;
+    let lightning;
     const emitAudio = (event, data) => {
       if (!reinforcement) game.events.emit(event, data);
     };
-    const { rig, mixer, actions } = bindDefenseRig({ ...giganotosaurusData, clips: [...giganotosaurusData.clips, gigaBiteClip] }, mesh);
+    const legacy = bindDefenseRig(giganotosaurusData, mesh);
+    const { rig } = legacy;
+    const biteRig = createBossAnimationRig(gigaBiteRigData, mesh.material);
+    const walkRig = createBossAnimationRig(gigaWalkData, mesh.material);
+    let activeRig = legacy;
+    const biteHead = biteRig.rig.getObjectByName("HeadEnd");
+    const biteJaw = biteRig.rig.getObjectByName("JawEnd");
     const model = new lt.Group();
     model.name = "giganotosaurus";
     model.scale.setScalar(normalSize);
-    model.add(rig);
+    model.add(rig, biteRig.rig, walkRig.rig);
+    walkRig.rig.visible = false;
+    biteRig.rig.visible = false;
     const head = rig.getObjectByName("Head");
     const mouth = new lt.Object3D();
     // Head-local offset below the nose, between the upper and lower jaws.
@@ -36,16 +75,17 @@
     flame.frustumCulled = false;
     game.events.on("player:dead", () => {
       flame.visible = false;
+      lightning?.hide();
       emitAudio("giga:reset");
     });
     flame.instanceMatrix.setUsage(lt.DynamicDrawUsage);
     game.scene.add(flame);
 
-    const biteImpact = .5;
+    const biteImpact = .56;
     const flameStart = 3.1, flameEnd = 6.1;
     // ---- Chỉnh tầm / phạm vi ở đây (gốc: detect 14, range 16, góc .27, scale 1, rộng .45) ----
-    const detectRange = 32;          // tầm phát hiện: cách người chơi bao xa (m) thì nó dừng lại gầm + phun lửa
-    const range = 34;                // tầm bắn lửa tối đa (m)
+    const detectRange = 32, giantDetectRange = 64;          // tầm phát hiện: cách người chơi bao xa (m) thì nó dừng lại gầm + phun lửa
+    const range = 34, giantRange = 62;                // tầm bắn lửa tối đa (m)
     const coneSlope = Math.tan(.42); // độ loe của nón lửa (góc nửa nón ~24°), cả hiệu ứng lẫn vùng gây sát thương
     const flameScale = 1.6;          // kích thước hạt lửa (hiệu ứng hình ảnh)
     const hitWidth = 1.2;            // độ rộng vùng gây sát thương ngay tại miệng (m)
@@ -54,8 +94,8 @@
     const facing = new W();
     const footPosition = new W();
     const footfalls = [
-      [0.28, rig.getObjectByName("Back_Leg_Foot_R")],
-      [2.2, rig.getObjectByName("Back_Leg_Foot_L")],
+      [.19, walkRig.rig.getObjectByName("foot_R")],
+      [.89, walkRig.rig.getObjectByName("foot_L")],
     ];
     const matrix = new lt.Matrix4();
     const color = new lt.Color();
@@ -66,17 +106,28 @@
       { bone: rig.getObjectByName("Hips"), radius: 1.55 },
       { bone: head, radius: 1.1 },
     ].map(part => ({ ...part, sphere: new lt.Sphere(new W(), part.radius) }));
+    const biteSpheres = ["Spine2", "Hips", "Head"].map((name, index) => ({
+      bone: biteRig.rig.getObjectByName(name), radius: spheres[index].radius, sphere: new lt.Sphere(new W()),
+    }));
+    const walkSpheres = ["spine2", "pelvis", "head"].map((name, index) => ({
+      bone: walkRig.rig.getObjectByName(name), radius: spheres[index].radius, sphere: new lt.Sphere(new W()),
+    }));
+    const walkMouth = new lt.Object3D();
+    walkMouth.position.set(0, -.025, .10);
+    walkRig.rig.getObjectByName("head").add(walkMouth);
+    const mouthAt = () => (activeRig === walkRig ? walkMouth : mouth).getWorldPosition(origin);
+    const currentSpheres = () => activeRig === biteRig ? biteSpheres : activeRig === walkRig ? walkSpheres : spheres;
     const particles = Array.from({ length: flameCount }, (_, index) => {
       const angle = index * 2.399963;
       const spread = .22 + (index % 9) / 12;
       return { x: Math.cos(angle) * spread, y: Math.sin(angle) * spread, phase: index / flameCount };
     });
 
-    let state, cooldown, repath, path, waypoint, action, corpseTime, corpseSeconds, protectIntro;
+    let state, cooldown, repath, path, waypoint, action, corpseTime, corpseSeconds;
     const enemy = {
       type: "giganotosaurus", pos: model.position, alive: false, hp: 0, maxHp: 0,
       damage(amount, impact) {
-        if (!this.alive || !(amount > 0) || (state === "intro" && protectIntro)) return false;
+        if (!this.alive || !(amount > 0) || state === "intro") return false;
         this.hp = Math.max(0, this.hp - amount);
         game.events.emit("enemy:hit", { enemy: this, pos: impact, damage: amount });
         if (this.hp) return false;
@@ -86,20 +137,25 @@
         play("Death");
         emitAudio("giga:breath", { active: false });
         emitAudio("giga:motion", { moving: false });
-        emitAudio("giga:death", { pos: mouth.getWorldPosition(origin) });
+        emitAudio("giga:death", { pos: mouthAt() });
         game.events.emit("enemy:killed", { enemy: this, pos: this.pos, type: this.type });
         return true;
       },
     };
 
     function play(name) {
-      mixer.stopAllAction();
-      action = actions.get(name).reset();
+      activeRig.mixer.stopAllAction();
+      activeRig = name === "Bite" ? biteRig : name === "Walk" ? walkRig : legacy;
+      lightning?.hide();
+      rig.visible = activeRig === legacy;
+      biteRig.rig.visible = activeRig === biteRig;
+      walkRig.rig.visible = activeRig === walkRig;
+      action = activeRig.actions.get(name).reset();
       const loop = name === "Walk";
       action.setLoop(loop ? lt.LoopRepeat : lt.LoopOnce, loop ? Infinity : 1);
       action.clampWhenFinished = !loop;
       action.play();
-      mixer.update(0);
+      activeRig.mixer.update(0);
     }
 
     function cast(origin, direction, maxDistance) {
@@ -114,8 +170,8 @@
     }
 
     function breathe(dt) {
-      mouth.getWorldPosition(origin);
-      emitAudio("giga:breath", { active: true, pos: origin });
+      mouthAt();
+      if (!yellow) emitAudio("giga:breath", { active: true, pos: origin });
       forward.copy(facing).normalize();
       // Follow the animated mouth while keeping the shot aimed at the spot
       // telegraphed when Roar began.
@@ -123,37 +179,46 @@
       forward.normalize();
       side.crossVectors(forward, lt.Object3D.DEFAULT_UP).normalize();
       up.crossVectors(side, forward).normalize();
-      const shot = cast(origin, forward, range);
-      const length = shot?.dist ?? range;
+      const limit = giant ? giantRange : range;
+      const shot = cast(origin, forward, limit);
+      const length = shot?.dist ?? limit;
       const elapsed = action.time - flameStart;
       const reach = Math.min(length, .8 + elapsed * 36);
-      flame.visible = true;
-      const jet = game.fx?.flameJet;
-      if (jet) {
-        // AAA flame: rendered by the FX particle engine (lobes + glow + embers + smoke + light).
-        flame.count = 0;
-        const blocked = shot && length < range - .2 && reach >= length - .01;
-        jet(origin, forward, {
-          dt, reach, slope: coneSlope, scale: flameScale, purple,
-          hit: blocked ? point.copy(origin).addScaledVector(forward, length) : null,
-          normal: shot?.normal,
+      if (yellow) {
+        flame.visible = false;
+        if (reach > .05) {
+          lightning ||= createSpinoBeamFx(game, true, true);
+          lightning.fire(origin, forward, reach, shot && reach >= length - .01 ? shot : null, dt);
+        }
+      } else {
+        flame.visible = true;
+        const jet = game.fx?.flameJet;
+        if (jet) {
+          // AAA flame: rendered by the FX particle engine (lobes + glow + embers + smoke + light).
+          flame.count = 0;
+          const blocked = shot && length < limit - .2 && reach >= length - .01;
+          jet(origin, forward, {
+            dt, reach, slope: coneSlope, scale: flameScale, purple,
+            hit: blocked ? point.copy(origin).addScaledVector(forward, length) : null,
+            normal: shot?.normal,
+          });
+        } else particles.forEach((p, index) => {
+          const t = (p.phase + elapsed * 2.2) % 1;
+          const distance = t * reach;
+          const width = distance * coneSlope;
+          point.copy(origin).addScaledVector(forward, distance)
+            .addScaledVector(side, p.x * width).addScaledVector(up, p.y * width);
+          const radius = (.13 + .49 * t) * (1 - .3 * t * t);
+          matrix.makeScale(radius, radius, radius).setPosition(point);
+          flame.setMatrixAt(index, matrix);
+          if (purple) color.setRGB(.65 + .35 * (1 - t), .15 + .45 * (1 - t), 1);
+          else color.setRGB(1, .1 + .78 * (1 - t), .025 + .24 * (1 - t) ** 3);
+          flame.setColorAt(index, color);
         });
-      } else particles.forEach((p, index) => {
-        const t = (p.phase + elapsed * 2.2) % 1;
-        const distance = t * reach;
-        const width = distance * coneSlope;
-        point.copy(origin).addScaledVector(forward, distance)
-          .addScaledVector(side, p.x * width).addScaledVector(up, p.y * width);
-        const radius = (.13 + .49 * t) * (1 - .3 * t * t);
-        matrix.makeScale(radius, radius, radius).setPosition(point);
-        flame.setMatrixAt(index, matrix);
-        if (purple) color.setRGB(.65 + .35 * (1 - t), .15 + .45 * (1 - t), 1);
-        else color.setRGB(1, .1 + .78 * (1 - t), .025 + .24 * (1 - t) ** 3);
-        flame.setColorAt(index, color);
-      });
-      if (!jet) {
-        flame.instanceMatrix.needsUpdate = true;
-        flame.instanceColor.needsUpdate = true;
+        if (!jet) {
+          flame.instanceMatrix.needsUpdate = true;
+          flame.instanceColor.needsUpdate = true;
+        }
       }
 
       const player = game.player;
@@ -169,14 +234,18 @@
 
     function bite() {
       const player = game.player;
-      mouth.getWorldPosition(origin);
-      const scale = purple && !reinforcement ? 2 : 1;
+      biteHead.getWorldPosition(origin).lerp(biteJaw.getWorldPosition(point), .4);
+      const scale = giant ? 2 : 1;
       target.copy(player.pos);
       target.y += .9;
       point.subVectors(target, origin);
       const distance = point.length();
-      if (!player.alive || Math.hypot(point.x, point.z) > 2 * scale ||
-          Math.abs(point.y) > 3.1 * scale || distance < .001) return;
+      forward.set(Math.sin(model.rotation.y), 0, Math.cos(model.rotation.y));
+      const depth = point.dot(forward);
+      const lateral = Math.abs(point.x * forward.z - point.z * forward.x);
+      const underHead = target.distanceToSquared(model.position) < (2.9 * scale) ** 2;
+      if (!player.alive || distance < .001 || Math.abs(point.y) > 4.1 * scale ||
+          (!underHead && (depth < -2.2 * scale || depth > 3.3 * scale || lateral > 3.65 * scale))) return;
       if (!cast(origin, point.multiplyScalar(1 / distance), distance)) {
         player.damage(32, origin);
       }
@@ -184,9 +253,10 @@
 
     function reset() {
       model.visible = flame.visible = enemy.alive = false;
-      mixer.stopAllAction();
+      activeRig.mixer.stopAllAction();
       state = "ready";
-      purple = false;
+      purple = yellow = giant = false;
+      lightning?.hide();
       emitAudio("giga:reset");
     }
     reset();
@@ -194,45 +264,51 @@
     return {
       reset,
       get available() { return state === "ready" || (state === "done" && !model.visible); },
-      get invulnerable() { return state === "intro" && protectIntro; },
+      get invulnerable() { return state === "intro"; },
       get alive() { return enemy.alive; },
       get sentryTarget() {
-        return enemy.alive && !(state === "intro" && protectIntro) ? { enemy: enemy, aimAt: out => spheres[0].bone.getWorldPosition(out) } : null;
+        return enemy.alive && state !== "intro" ? { enemy: enemy, aimAt: out => currentSpheres()[0].bone.getWorldPosition(out) } : null;
       },
       get started() { return state !== "ready"; },
       get purple() { return purple; },
+      get position() { return model.position; },
       get done() { return state === "done"; },
       get biting() { return state === "bite"; },
       get burning() { return flame.visible; },
       get windingUp() { return state === "roar" && action.time < flameStart; },
       get health() { return enemy.hp; },
       get maxHealth() { return enemy.maxHp; },
-      start(position, health, { purpleBoss = false, introRoar = false, invulnerableIntro = false, corpse = Infinity } = {}) {
-        purple = purpleBoss;
-        protectIntro = invulnerableIntro;
+      start(position, health, { variant = "normal", giant: large = false, corpse = Infinity } = {}) {
+        purple = variant === "purple";
+        yellow = variant === "yellow";
+        giant = large;
         corpseSeconds = corpse;
         corpseTime = 0;
-        model.scale.setScalar(normalSize * (purple && !reinforcement ? 2 : 1));
-        mesh.material.map = purple ? purpleMap : originalMap;
+        model.scale.setScalar(normalSize * (giant ? 2 : 1));
+        mesh.material.map = yellow ? yellowMap : purple ? purpleMap : originalMap;
+        mesh.material.emissiveMap = yellow ? yellowEmissive : null;
+        mesh.material.emissive.setHex(yellow ? 0xffffff : 0);
+        mesh.material.emissiveIntensity = yellow ? .85 : 1;
+        mesh.material.needsUpdate = true;
         flame.visible = false;
         model.position.copy(position);
         model.rotation.y = Math.atan2(game.player.pos.x - position.x, game.player.pos.z - position.z);
         model.visible = enemy.alive = true;
         enemy.hp = enemy.maxHp = health;
-        state = introRoar ? "intro" : "walk";
+        state = "intro";
         cooldown = 1;
         path = [];
         repath = waypoint = 0;
-        play(introRoar ? "Roar" : "Walk");
-        if (introRoar) game.events.emit("giga:roar", { pos: mouth.getWorldPosition(origin) });
+        play("Roar");
+        game.events.emit("giga:roar", { pos: mouthAt() });
         game.events.emit("enemy:spawn", { enemy });
       },
       raycast(start, direction, maxDistance) {
-        if (!enemy.alive || (state === "intro" && protectIntro)) return null;
+        if (!enemy.alive || state === "intro") return null;
         ray.set(start, direction);
         let closest = null;
-        for (const { bone, radius, sphere } of spheres) {
-          sphere.radius = radius * (purple && !reinforcement ? 2 : 1);
+        for (const { bone, radius, sphere } of currentSpheres()) {
+          sphere.radius = radius * (giant ? 2 : 1);
           bone.getWorldPosition(sphere.center);
           if (!ray.intersectSphere(sphere, hit)) continue;
           const dist = start.distanceTo(hit);
@@ -249,7 +325,7 @@
           return;
         }
         const previousTime = action.time;
-        if (state !== "walk") mixer.update(dt);
+        if (state !== "walk") activeRig.mixer.update(dt);
         if (state === "dying") {
           if (action.time >= action.getClip().duration - .001) state = "done";
           return;
@@ -274,7 +350,10 @@
         if (state === "roar") {
           flame.visible = false;
           if (action.time >= flameStart && action.time < flameEnd) breathe(dt);
-          else emitAudio("giga:breath", { active: false });
+          else {
+            lightning?.hide();
+            if (!yellow) emitAudio("giga:breath", { active: false });
+          }
           if (action.time >= action.getClip().duration - .001) {
             state = "walk";
             cooldown = 2;
@@ -291,18 +370,19 @@
         target.y += .9;
         delta.subVectors(target, model.position);
         delta.y = 0;
-        const biteRange = purple && !reinforcement ? 11 : 5.5;
+        const biteRange = giant ? 13 : 6.5;
         const close = delta.lengthSq() <= biteRange ** 2;
-        if (cooldown <= 0 && delta.lengthSq() <= detectRange ** 2) {
+        if (cooldown <= 0 && delta.lengthSq() <= (giant ? giantDetectRange : detectRange) ** 2) {
           face(delta, dt);
-          mouth.getWorldPosition(origin);
+          mouthAt();
           point.subVectors(target, origin);
           const distance = point.length();
           forward.set(Math.sin(model.rotation.y), 0, Math.cos(model.rotation.y));
-          if (delta.normalize().dot(forward) > .97 && !cast(origin, point.normalize(), distance)) {
+          if ((delta.lengthSq() < 9 || delta.normalize().dot(forward) > .97) && !cast(origin, point.normalize(), distance)) {
             if (close) {
               state = "bite";
               play("Bite");
+              game.events.emit("giga:bite", { pos: biteHead.getWorldPosition(origin) });
               emitAudio("giga:motion", { moving: false });
               return;
             }
@@ -311,7 +391,7 @@
             state = "roar";
             play("Roar");
             emitAudio("giga:motion", { moving: false });
-            emitAudio("giga:roar", { pos: mouth.getWorldPosition(origin) });
+            emitAudio("giga:roar", { pos: mouthAt() });
             return;
           }
         }
@@ -338,7 +418,7 @@
         }
         emitAudio("giga:motion", { moving, pos: model.position });
         if (!moving) return;
-        mixer.update(dt);
+        walkRig.mixer.update(dt);
         const now = action.time;
         for (const [at, bone] of footfalls) {
           if (now >= previousTime ? at > previousTime && at <= now : at > previousTime || at <= now) {

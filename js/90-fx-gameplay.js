@@ -3435,14 +3435,14 @@ void main() {
     // that follows the jet, (7) impact fire + scorch decal + lingering ground fire where the jet hits a surface.
     const jetAcc = [0, 0, 0, 0, 0], jetFwd = new W(), jetV = new W(), jetHit = new W(), jetN = new W();
     let jetLight = null, jetIdle = 9, jetT = 0, jetGround = 0, jetScorch = 0;
-    function jetLobe(x, y, z, vx, vy, vz, life, s0, s1, core, rise, shade, purple) {
+    function jetLobe(x, y, z, vx, vy, vz, life, s0, s1, core, rise, shade, purple, yellow, red) {
       const id = l.emit(x, y, z, vx, vy, vz, life, s0, s1);
       if (id < 0) return -1;
       const k = Ze(0.85, 1.15);
       l.frame[id] = ht() < 0.2 ? 7 : (ht() * 6) | 0;
       l.ramp[id] = purple ? 4 : 2;
       l.r[id] = (purple ? (core ? 6 : 3.4) : (core ? 8 : 5.6)) * k;
-      l.g[id] = (purple ? (core ? 2.2 : .32) : (core ? 5 : 2.3)) * k;
+      l.g[id] = (purple ? (core ? 2.2 : .32) : (yellow ? (core ? 7 : 4.2) : red ? (core ? 1.45 : .38) : (core ? 5 : 2.3))) * k;
       l.b[id] = (purple ? (core ? 8 : 5.6) : (core ? 1.8 : .5)) * k;
       l.a[id] = 0.95;
       l.shade[id] = 2 + shade;
@@ -3459,7 +3459,7 @@ void main() {
     }
     function flameJet(origin, dir, o = {}) {
       const dt = Math.min(o.dt || 1 / 60, 0.1), reach = Math.max(1, o.reach || 16);
-      const scale = o.scale || 1, slope = o.slope || 0.27, purple = !!o.purple;
+      const scale = o.scale || 1, slope = o.slope || 0.27, purple = !!o.purple, yellow = !!o.yellow, red = !!o.red;
       jetFwd.copy(dir).normalize();
       jetIdle = 0;
       jetT += dt;
@@ -3477,7 +3477,7 @@ void main() {
         jetLobe(origin.x + jetV.x * sp * t, origin.y + jetV.y * sp * t, origin.z + jetV.z * sp * t,
           jetV.x * sp, jetV.y * sp, jetV.z * sp,
           core ? Ze(0.3, 0.5) : Ze(0.55, 0.95), (core ? 0.9 : 1.2) * scale, (core ? 2.2 : 3.8) * scale,
-          core, core ? 0.8 : 1.8, shade, purple);
+          core, core ? 0.8 : 1.8, shade, purple, yellow, red);
       }
       // (2) additive glow
       while (jetAcc[1] >= 1) {
@@ -3488,7 +3488,7 @@ void main() {
           Ze(0.25, 0.45), 1.4 * scale, 4.2 * scale);
         if (id >= 0) {
           c.frame[id] = V1; c.ramp[id] = purple ? 4 : 2;
-          c.r[id] = purple ? 1.9 : 2.6; c.g[id] = purple ? .35 : 1.15; c.b[id] = purple ? 3.1 : .3;
+          c.r[id] = purple ? 1.9 : 2.6; c.g[id] = purple ? .35 : yellow ? 1.9 : red ? .28 : 1.15; c.b[id] = purple ? 3.1 : .3;
           c.drag[id] = 1.6; c.rot[id] = ht() * 6.283; c.rotv[id] = (ht() - 0.5) * 3;
           c.fin[id] = 0.1; c.fout[id] = 0.45; c.wind[id] = 1; c.turb[id] = 1.5;
         }
@@ -3502,8 +3502,12 @@ void main() {
           jetV.x * sp, jetV.y * sp, jetV.z * sp, Ze(1.1, 2.4), 0.09 * scale, 0.03 * scale);
         if (id >= 0) {
           c.frame[id] = oo; c.ramp[id] = 3;
-          c.r[id] = purple ? 7 : 10; c.g[id] = purple ? 1.4 : 4.2; c.b[id] = purple ? 10 : 1;
+          c.r[id] = purple ? 7 : 10; c.g[id] = purple ? 1.4 : yellow ? 7.2 : red ? 1.1 : 4.2; c.b[id] = purple ? 10 : 1;
           c.drag[id] = 0.8; c.grav[id] = -0.6; c.turb[id] = 4; c.wind[id] = 1; c.fout[id] = 0.5;
+        }
+        if (yellow && ht() < .45) {
+          beamSpark(origin.x, origin.y, origin.z, jetV.x * sp, jetV.y * sp, jetV.z * sp,
+            .14, .11 * scale, 2, 8, 6.5, .35);
         }
       }
       // (4) smoke from the tail of the jet
@@ -3518,7 +3522,7 @@ void main() {
       }
       // (5) mouth flare
       w(origin.x + jetFwd.x * 0.4, origin.y + jetFwd.y * 0.4, origin.z + jetFwd.z * 0.4,
-        0.07, 2.2 * scale, 3.4 * scale, purple ? 5 : 7, purple ? 2 : 4.2, purple ? 8 : 1.6, oo);
+        0.07, 2.2 * scale, 3.4 * scale, purple ? 5 : 7, purple ? 2 : yellow ? 6.7 : red ? 1.25 : 4.2, purple ? 8 : 1.6, oo);
       // (6) dynamic light following the jet
       if (!jetLight) {
         const pool = y();
@@ -3527,6 +3531,8 @@ void main() {
       if (jetLight) {
         const L = jetLight.light, f = 0.85 + 0.15 * Math.sin(jetT * 61 + 1.3);
         if (purple) L.color.setRGB(.54, .11 + .04 * Math.sin(jetT * 47), 1);
+        else if (yellow) L.color.setRGB(1, .72, .075);
+        else if (red) L.color.setRGB(1, .12, .045);
         else L.color.setRGB(1, .42 + .1 * Math.sin(jetT * 47), .12);
         L.position.set(origin.x + jetFwd.x * reach * 0.4, origin.y + jetFwd.y * reach * 0.4, origin.z + jetFwd.z * reach * 0.4);
         L.distance = 30;
@@ -3542,7 +3548,7 @@ void main() {
           ro(jetN, 1.1, jetV);
           const sp = Ze(2, 7);
           jetLobe(jetHit.x + jetN.x * 0.3, jetHit.y + jetN.y * 0.3, jetHit.z + jetN.z * 0.3,
-            jetV.x * sp, jetV.y * sp + 1, jetV.z * sp, Ze(0.5, 0.9), 1.1 * scale, 3.2 * scale, ht() < 0.3, 2.2, shade, purple);
+            jetV.x * sp, jetV.y * sp + 1, jetV.z * sp, Ze(0.5, 0.9), 1.1 * scale, 3.2 * scale, ht() < 0.3, 2.2, shade, purple, yellow, red);
         }
         if ((jetScorch -= dt) <= 0) { jetScorch = 0.25; p.add(jetHit, jetN, "scorch", 3.2); }
         if (!purple && (jetGround -= dt) <= 0) { jetGround = 0.8; X(jetHit.x, jetHit.y, jetHit.z, "fire", 1.6, 2.2, shade); }
@@ -3578,6 +3584,14 @@ void main() {
       c.r[id] = r; c.g[id] = g; c.b[id] = b; c.flags[id] = Xc; c.ramp[id] = 3;
       return id;
     }
+    function tintedSpark(yellow, x, y, z, vx, vy, vz, life, size, gravity, r, g, b) {
+      return beamSpark(x, y, z, vx, vy, vz, life, size, gravity,
+        yellow ? b : r, yellow ? r * 1.25 : g, yellow ? g * .22 : b);
+    }
+    function tintedLobe(yellow, x, y, z, vx, vy, vz, life, s0, s1, r, g, b, rise, shade) {
+      return beamLobe(x, y, z, vx, vy, vz, life, s0, s1,
+        yellow ? b : r, yellow ? r * 1.25 : g, yellow ? g * .22 : b, rise, shade);
+    }
     function beamJet(origin, dir, o = {}) {
       const dt = Math.min(o.dt || 1 / 60, 0.1), len = Math.max(1, o.length || 20), sc = o.scale || 1;
       beamFwd.copy(dir).normalize();
@@ -3597,7 +3611,7 @@ void main() {
         const sDist = len * ht(), a = ht() * 6.283, ca = Math.cos(a), sa = Math.sin(a);
         beamV.set(beamR.x * ca + beamU.x * sa, beamR.y * ca + beamU.y * sa, beamR.z * ca + beamU.z * sa);
         const out = Ze(10, 34) * sc * 0.6, along = Ze(-6, 14);
-        beamSpark(origin.x + beamFwd.x * sDist + beamV.x * 0.5 * sc, origin.y + beamFwd.y * sDist + beamV.y * 0.5 * sc,
+        tintedSpark(o.yellow, origin.x + beamFwd.x * sDist + beamV.x * 0.5 * sc, origin.y + beamFwd.y * sDist + beamV.y * 0.5 * sc,
           origin.z + beamFwd.z * sDist + beamV.z * 0.5 * sc,
           beamV.x * out + beamFwd.x * along, beamV.y * out + beamFwd.y * along + 1.5, beamV.z * out + beamFwd.z * along,
           Ze(0.18, 0.5), 0.07 * sc, 3.5, 4.6, 1.8, 7.4);
@@ -3611,7 +3625,7 @@ void main() {
           origin.z + beamFwd.z * sDist + (beamR.z * Math.cos(a) + beamU.z * Math.sin(a)) * 0.9 * sc,
           beamFwd.x * 18, beamFwd.y * 18, beamFwd.z * 18, Ze(0.12, 0.26), 1.7 * sc, 0.5 * sc);
         if (id >= 0) {
-          c.frame[id] = V1; c.ramp[id] = 4; c.r[id] = 1.5; c.g[id] = 0.45; c.b[id] = 3.2;
+          c.frame[id] = V1; c.ramp[id] = 4; c.r[id] = o.yellow ? 3.2 : 1.5; c.g[id] = o.yellow ? 1.5 : .45; c.b[id] = o.yellow ? .2 : 3.2;
           c.drag[id] = 0.5; c.fin[id] = 0.1; c.fout[id] = 0.5;
         }
       }
@@ -3623,7 +3637,7 @@ void main() {
         const sDist = len * Math.pow(ht(), 1.25), a = ht() * 6.283, ca = Math.cos(a), sa = Math.sin(a), core = ht() < 0.4;
         beamV.set(beamR.x * ca + beamU.x * sa, beamR.y * ca + beamU.y * sa, beamR.z * ca + beamU.z * sa);
         const off = (core ? 0.12 : 0.3) * sc * ht(), out = Ze(0.2, 1.2), fw = Ze(14, 32);
-        beamLobe(origin.x + beamFwd.x * sDist + beamV.x * off, origin.y + beamFwd.y * sDist + beamV.y * off, origin.z + beamFwd.z * sDist + beamV.z * off,
+        tintedLobe(o.yellow, origin.x + beamFwd.x * sDist + beamV.x * off, origin.y + beamFwd.y * sDist + beamV.y * off, origin.z + beamFwd.z * sDist + beamV.z * off,
           beamV.x * out + beamFwd.x * fw, beamV.y * out + beamFwd.y * fw, beamV.z * out + beamFwd.z * fw,
           core ? Ze(0.12, 0.22) : Ze(0.18, 0.32), (core ? 0.5 : 0.65) * sc, (core ? 1.0 : 1.5) * sc,
           core ? 6 : 3.0, core ? 2.4 : 0.7, core ? 8 : 5.2, 0.3, shade);
@@ -3637,7 +3651,7 @@ void main() {
           (beamR.x * ca + beamU.x * sa) * sp + beamFwd.x * Ze(0, 6), (beamR.y * ca + beamU.y * sa) * sp + beamFwd.y * Ze(0, 6), (beamR.z * ca + beamU.z * sa) * sp + beamFwd.z * Ze(0, 6),
           Ze(1.1, 2.4), 0.09 * sc, 0.03 * sc);
         if (id >= 0) {
-          c.frame[id] = oo; c.ramp[id] = 3; c.r[id] = 7; c.g[id] = 1.4; c.b[id] = 10;
+          c.frame[id] = oo; c.ramp[id] = 3; c.r[id] = o.yellow ? 10 : 7; c.g[id] = o.yellow ? 6 : 1.4; c.b[id] = o.yellow ? .7 : 10;
           c.drag[id] = 0.8; c.grav[id] = -0.6; c.turb[id] = 4; c.wind[id] = 1; c.fout[id] = 0.5;
         }
       }
@@ -3654,12 +3668,12 @@ void main() {
         beamAcc[10] -= 1;
         ro(beamFwd, 0.5, beamV);
         const sp = Ze(10, 24);
-        beamLobe(origin.x + beamFwd.x * 0.3, origin.y + beamFwd.y * 0.3, origin.z + beamFwd.z * 0.3,
+        tintedLobe(o.yellow, origin.x + beamFwd.x * 0.3, origin.y + beamFwd.y * 0.3, origin.z + beamFwd.z * 0.3,
           beamV.x * sp, beamV.y * sp, beamV.z * sp, Ze(0.18, 0.32), 1.1 * sc, 2.6 * sc, 6, 2.2, 8, 0.2, shade);
       }
       // (3) flare ở miệng
       w(origin.x + beamFwd.x * 0.4, origin.y + beamFwd.y * 0.4, origin.z + beamFwd.z * 0.4,
-        0.07, 2.6 * sc, 4.2 * sc, 5.8 * flick, 2.2 * flick, 9 * flick, oo);
+        0.07, 2.6 * sc, 4.2 * sc, (o.yellow ? 9 : 5.8) * flick, (o.yellow ? 5.8 : 2.2) * flick, (o.yellow ? .7 : 9) * flick, oo);
       // (4) đèn động: một ở giữa beam, một ở điểm chạm
       const pool = y();
       for (let k = 0; k < 2; k++) {
@@ -3668,7 +3682,8 @@ void main() {
         const bl = beamLights[k];
         if (!bl) continue;
         const L = bl.light;
-        L.color.setRGB(0.62 + 0.1 * Math.sin(beamT * 41 + k), 0.28 + 0.1 * Math.sin(beamT * 37 + k * 2), 1);
+        if (o.yellow) L.color.setRGB(1, .69, .09);
+        else L.color.setRGB(0.62 + 0.1 * Math.sin(beamT * 41 + k), 0.28 + 0.1 * Math.sin(beamT * 37 + k * 2), 1);
         if (k === 0) {
           const d = Math.min(len * 0.45, 16);
           L.position.set(origin.x + beamFwd.x * d, origin.y + beamFwd.y * d, origin.z + beamFwd.z * d);
@@ -3688,14 +3703,14 @@ void main() {
           beamAcc[3] -= 1;
           ro(beamN, 1.15, beamP);
           const sp = Ze(7, 30) * sc * 0.65;
-          beamSpark(beamHit.x + beamN.x * 0.3, beamHit.y + beamN.y * 0.3, beamHit.z + beamN.z * 0.3,
+          tintedSpark(o.yellow, beamHit.x + beamN.x * 0.3, beamHit.y + beamN.y * 0.3, beamHit.z + beamN.z * 0.3,
             beamP.x * sp, beamP.y * sp + 2, beamP.z * sp, Ze(0.35, 0.95), 0.08 * sc, 9.81, 5.4, 2, 7.6);
         }
         while (beamAcc[4] >= 1) {                                   // cầu sáng nổ tại điểm chạm
           beamAcc[4] -= 1;
           ro(beamN, 0.9, beamP);
           const sp = Ze(1, 5);
-          beamLobe(beamHit.x + beamN.x * 0.4, beamHit.y + beamN.y * 0.4, beamHit.z + beamN.z * 0.4,
+          tintedLobe(o.yellow, beamHit.x + beamN.x * 0.4, beamHit.y + beamN.y * 0.4, beamHit.z + beamN.z * 0.4,
             beamP.x * sp, beamP.y * sp + 1, beamP.z * sp, Ze(0.35, 0.7), 1.4 * sc, 3.6 * sc,
             ht() < 0.4 ? 5.2 : 2.4, ht() < 0.4 ? 2.2 : 0.8, ht() < 0.4 ? 9 : 5.2, 1.6, shade);
         }
@@ -3729,7 +3744,7 @@ void main() {
         beamAcc[11] -= 1;
         beamP.set(ht() - 0.5, ht() - 0.5, ht() - 0.5).normalize();
         const sp = Ze(0.5, 3);
-        beamLobe(origin.x + beamP.x * r * 0.8, origin.y + beamP.y * r * 0.8, origin.z + beamP.z * r * 0.8,
+        tintedLobe(o.yellow, origin.x + beamP.x * r * 0.8, origin.y + beamP.y * r * 0.8, origin.z + beamP.z * r * 0.8,
           beamP.x * sp, beamP.y * sp, beamP.z * sp, Ze(0.25, 0.5), (0.5 * r + 0.2), (1.1 + 1.2 * pr) * r,
           ht() < 0.4 ? 6 : 3.4, ht() < 0.4 ? 2.2 : 0.32, ht() < 0.4 ? 8 : 5.6, 0, shade);
       }
@@ -3737,14 +3752,15 @@ void main() {
         beamAcc[12] -= 1;
         beamP.set(ht() - 0.5, ht() - 0.5, ht() - 0.5).normalize();
         const sp = Ze(6, 18) * (0.4 + pr);
-        beamSpark(origin.x + beamP.x * r, origin.y + beamP.y * r, origin.z + beamP.z * r,
+        tintedSpark(o.yellow, origin.x + beamP.x * r, origin.y + beamP.y * r, origin.z + beamP.z * r,
           beamP.x * sp, beamP.y * sp, beamP.z * sp, Ze(0.15, 0.4), 0.06, 2, 3.5, 0.9, 7);
       }
       if (!beamLights[0]) { const pool = y(); beamLights[0] = pool && pool.acquire ? pool.acquire() : null; }
       const bl = beamLights[0];
       if (bl) {
         const L = bl.light;
-        L.color.setRGB(0.6 + 0.1 * Math.sin(beamT * 41), 0.25 + 0.1 * Math.sin(beamT * 37), 1);
+        if (o.yellow) L.color.setRGB(1, .69, .09);
+        else L.color.setRGB(0.6 + 0.1 * Math.sin(beamT * 41), 0.25 + 0.1 * Math.sin(beamT * 37), 1);
         L.position.set(origin.x, origin.y, origin.z);
         L.distance = 10 + 22 * pr; L.intensity = (30 + 240 * pr) * flick;
       }
@@ -5115,6 +5131,10 @@ void main() {
       Wo(n, 1.5)
     );
   }
+  const bossMoveAudio = /*@inline:data/boss-move-audio.json*/ null;
+  const bossMoveSample = name => () => Float32Array.from(
+    new Int16Array(assetBytes(bossMoveAudio[name])), sample => sample / 32768);
+
   const gigaAudioSamples = /*@inline:data/giga-audio.json*/ null;
 
   function gigaSample(name) {
@@ -5138,6 +5158,9 @@ void main() {
 
   const victoryAudio = /*@inline:data/victory-audio.json*/ null;
 
+  const characterDeathVoice = /*@inline:data/character-death-voice.json*/ null;
+  const lowHealthVoice = /*@inline:data/low-health-voice.json*/ null;
+  const gigaDuoVoice = /*@inline:data/giga-duo-voice.json*/ null;
   const handlerAudio = /*@inline:data/handler-audio.json*/ null;
 
   const playerAkAudio = /*@inline:data/player-ak-audio.json*/ null;
@@ -5426,46 +5449,6 @@ void main() {
     }
     return Wo(ml(n, 0.36), 1.7);
   }
-  function z8(i, e) {
-    let t = St(i, 1.7);
-    Se(t, at(i, e, 0.01, 0.002, { hp: 2500 }), 0, 1, i);
-    let n = Qn(i, 0.5, e);
-    tn(n, "bp", 3e3, 0.8, i);
-    let s = 1;
-    for (let l = 0; l < n.length; l++) {
-      let c = l / i;
-      (l % 220 === 0 && (s = e() < 0.55 + 0.4 * (1 - c / 0.5) ? 1 : 0),
-        (n[l] =
-          (n[l] * (Math.sin(vt * 100 * c) > -0.2 ? 1 : 0.15) +
-            0.35 * Math.sign(Math.sin(vt * 100 * c)) * (e() - 0.3)) *
-          s *
-          Math.exp(-c / 0.3)));
-    }
-    Se(t, n, 0.005, 0.8, i);
-    let o = St(i, 1.25),
-      r = 0,
-      a = 0;
-    for (let l = 0; l < o.length; l++) {
-      let c = l / i,
-        u = Math.pow(0.22, c / 1.2);
-      ((r += (vt * 100 * u) / i),
-        (a += (vt * (150 + 1900 * Math.pow(1 - c / 1.25, 2.2))) / i),
-        (o[l] =
-          ((Math.sin(r) +
-            0.6 * Math.sin(2 * r) +
-            0.4 * Math.sin(3 * r) +
-            0.25 * Math.sin(5 * r)) *
-            0.5 +
-            Math.sin(a) * 0.22) *
-          Math.pow(1 - c / 1.25, 1.2) *
-          (1 - Math.exp(-c / 0.03))));
-    }
-    return (
-      Se(t, o, 0.4, 0.8, i),
-      Se(t, ei(i, 0.12, 140, 60, 0.03, 0.04), 0.4, 0.5, i),
-      Wo(t, 1.3)
-    );
-  }
   function* D8(i, e, t) {
     let n = St(i, 6.5),
       s = Qn(i, 6.4, e);
@@ -5539,64 +5522,6 @@ void main() {
     }
     return (tn(n, "lp", 4200, 0.7, i), n);
   }
-  function F8(i, e, t) {
-    let n = St(i, 1.1),
-      s = t ? 1.19 : 1,
-      o = 0.01,
-      r = t ? 3 : 4;
-    for (let a = 0; a < r; a++)
-      (Se(
-        n,
-        dn(
-          i,
-          0.5,
-          [
-            [2310 * s, Xt(e, 0.06, 0.13), 1],
-            [3740 * s, 0.07, 0.7],
-            [5910 * s, 0.04, 0.5],
-            [8130 * s, 0.025, 0.3],
-            [1012 * s, 0.03, 0.3],
-          ],
-          e,
-        ),
-        o,
-        Xt(e, 0.35, 1),
-        i,
-      ),
-        Se(n, at(i, e, 0.004, 0.001, { hp: 3e3 }), o, 0.3, i),
-        (o += Xt(e, 0.09, 0.26)));
-    return n;
-  }
-  function U8(i, e) {
-    let t = St(i, 2.8),
-      n = St(i, 2.2);
-    return (
-      Se(
-        n,
-        dn(
-          i,
-          2.2,
-          [
-            [47, 0.7, 1],
-            [77, 0.55, 0.9],
-            [121, 0.4, 0.7],
-            [163, 0.3, 0.5],
-            [214, 0.22, 0.4],
-            [330, 0.12, 0.25],
-          ],
-          e,
-        ),
-        0,
-        0.5,
-        i,
-      ),
-      Se(n, at(i, e, 0.5, 0.11, { lp: 420 }), 0, 1, i),
-      Se(t, n, 0, 1, i),
-      Se(t, n, 0.36, 0.3, i),
-      Se(t, n, 0.61, 0.12, i),
-      t
-    );
-  }
   function N8(i, e) {
     let t = St(i, 0.09);
     return (
@@ -5641,78 +5566,6 @@ void main() {
       t
     );
   }
-  function* O8(i, e) {
-    let n = function* (s) {
-      let o = Zc(i, 6, s, (u) => {
-        (tn(u, "hp", 900, 0.6, i), tn(u, "lp", 8500, 0.6, i));
-      });
-      yield;
-      let r = Zc(i, 6, s, (u) => {
-          tn(u, "bp", 420, 0.5, i);
-        }),
-        a = o.length,
-        l = Q1(a, [o, 0.5], [r, 0.75]),
-        c = new Float32Array(a);
-      for (let u = 0; u < 1020; u++) {
-        let h = Math.floor(s() * a),
-          f = Math.round(Xt(s, 6e-4, 0.003) * i),
-          p = Math.pow(s(), 3) * 1.6 + 0.15;
-        for (let d = 0; d < f; d++)
-          ((c[h] += (s() * 2 - 1) * p * Math.exp((-5 * d) / f)),
-            ++h >= a && (h = 0));
-      }
-      (yield, di(c, "hp", () => 2200, 0.7, i, 2), yield);
-      for (let u = 0; u < 30; u++) {
-        let h = Xt(s, 700, 2100);
-        Us(
-          c,
-          jc(i, Xt(s, 0.008, 0.02), h, h * 1.7),
-          s() * 6,
-          Xt(s, 0.08, 0.3),
-          i,
-        );
-      }
-      for (let u = 0; u < a; u++) l[u] += c[u] * 0.55;
-      return l;
-    };
-    return [
-      yield* n(ao(Math.floor(e() * 1e9))),
-      yield* n(ao(Math.floor(e() * 1e9))),
-    ];
-  }
-  function* H8(i, e) {
-    let n = function* (s) {
-      let o = Zc(i, 6, s, (c) => {
-          (tn(c, "lp", 1300, 0.6, i), tn(c, "hp", 110, 0.7, i));
-        }),
-        r = o.length,
-        a = new Float32Array(r);
-      for (let c = 0; c < 1560; c++)
-        a[Math.floor(s() * r)] += (s() * 2 - 1) * (0.2 + Math.pow(s(), 4) * 3);
-      let l = Q1(r, [o, 0.8]);
-      for (let [c, u, h] of [
-        [1820, 14, 1],
-        [2740, 16, 0.8],
-        [4150, 18, 0.6],
-        [6200, 14, 0.35],
-        [940, 8, 0.7],
-      ]) {
-        let f = Float32Array.from(a);
-        di(f, "bp", () => c, u, i, 2);
-        for (let p = 0; p < r; p++) l[p] += f[p] * h * 5;
-        yield;
-      }
-      for (let c = 0; c < 4; c++) {
-        let u = Xt(s, 900, 1600);
-        Us(l, jc(i, 0.014, u, u * 1.8), s() * 6, 0.25, i);
-      }
-      return l;
-    };
-    return [
-      yield* n(ao(Math.floor(e() * 1e9))),
-      yield* n(ao(Math.floor(e() * 1e9))),
-    ];
-  }
   function V8(i, e) {
     let s = Qn(i, 8.5, e),
       o = Float32Array.from(s);
@@ -5748,99 +5601,6 @@ void main() {
     }
     return Rv(s, i * 8, !0);
   }
-  function* W8(i, e) {
-    let s = Qn(i, 8.5, e),
-      o = Qn(i, 8 + 0.5, e),
-      r = Qn(i, 8 + 0.5, e);
-    (yield,
-      tn(s, "lp", 1100, 0.6, i),
-      tn(s, "hp", 70, 0.7, i),
-      tn(o, "hp", 2400, 0.7, i),
-      tn(r, "bp", 520, 1.2, i),
-      yield);
-    for (let a = 0; a < s.length; a++) {
-      let l = a / i,
-        c = (l % 4) / 4,
-        u = Math.pow(0.5 - 0.5 * Math.cos(vt * c), 1.5),
-        h = Math.exp(-Math.pow((c - 0.5) / 0.05, 2)),
-        f = Math.exp(-Math.pow((c - 0.68) / 0.16, 2)),
-        p = 0.5 - 0.5 * Math.cos((vt * ((l + 1.3) % 2.667)) / 2.667);
-      s[a] =
-        s[a] * (0.3 + 0.7 * u + 0.25 * p) + r[a] * h * 1.8 + o[a] * f * 0.35;
-    }
-    return Rv(s, i * 8, !0);
-  }
-  var Fr = { bpm: 100, bar: 2.4, loopBars: 8, sr: 32e3 },
-    Cv = [
-      { root: 38, tones: [0, 3, 7, 12, 10], base: 50 },
-      { root: 34, tones: [0, 4, 7, 12, 11], base: 46 },
-      { root: 31, tones: [0, 3, 7, 12, 10], base: 43 },
-      { root: 33, tones: [0, 5, 7, 12, 10], base: 45 },
-    ];
-  function Jb(i, e, t, n, s, o, r) {
-    let a = Math.round((t + s) * i),
-      l = new Float32Array(a),
-      c = [r(), r(), r()],
-      u = [1 - o, 1, 1 + o * 1.1];
-    for (let h = 0; h < a; h++) {
-      let f = h / i,
-        p = 0;
-      for (let v = 0; v < 3; v++)
-        ((c[v] += (e * u[v]) / i),
-          (c[v] -= Math.floor(c[v])),
-          (p += 2 * c[v] - 1));
-      let d =
-        f < t
-          ? 1 - Math.exp(-f / n)
-          : (1 - Math.exp(-t / n)) * Math.exp(-(f - t) / (s * 0.3));
-      l[h] = p * d * 0.33;
-    }
-    return (em(l, i, 0, 0.1), l);
-  }
-  function* G8(i, e) {
-    let t = Fr.bar * 8,
-      n = Math.round(t * i),
-      s = function* (o) {
-        let r = new Float32Array(n);
-        for (let a = 0; a < 4; a++) {
-          let l = Cv[a],
-            c = a * 4.8;
-          for (let [u, h] of [
-            [0, 1],
-            [7, 0.6],
-            [12, 0.5],
-            [l.tones[1] + 12, 0.28],
-          ])
-            (Us(
-              r,
-              Jb(i, Ns(l.root + u), 4.6, 1.3, 1.8, 0.0035, o),
-              c - 0.5,
-              h * 0.3,
-              i,
-            ),
-              yield);
-        }
-        return (
-          Us(r, Jb(i, Ns(26), t - 0.2, 2.5, 0.2, 0.002, o), 0.1, 0.16, i),
-          yield,
-          di(
-            r,
-            "lp",
-            (a) =>
-              560 + 300 * Math.sin(vt * a * 2) + 120 * Math.sin(vt * a * 5 + 1),
-            0.9,
-            i,
-            2,
-          ),
-          yield,
-          r
-        );
-      };
-    return [
-      yield* s(ao(Math.floor(e() * 1e9))),
-      yield* s(ao(Math.floor(e() * 1e9))),
-    ];
-  }
   function n_(i, e, t) {
     let n = Math.round(0.42 * i),
       s = new Float32Array(n),
@@ -5863,65 +5623,6 @@ void main() {
         (s[u] = l * Math.exp(-h / 0.1) * Math.min(1, u / 40)));
     }
     return em(s, i, 0, 0.03);
-  }
-  function* q8(i) {
-    let e = Fr.bar * 8,
-      t = new Float32Array(Math.round(e * i)),
-      n = [0, 0, 2, 0, 1, 0, 2, 0, 3, 0, 2, 0, 1, 0, 4, 2],
-      s = [
-        1, 0.45, 0.7, 0.45, 0.85, 0.45, 0.7, 0.5, 1, 0.45, 0.7, 0.45, 0.85, 0.5,
-        0.8, 0.6,
-      ];
-    for (let o = 0; o < 128; o++) {
-      let r = Cv[(o >> 5) & 3],
-        a = o & 15,
-        l = n_(i, Ns(r.base + r.tones[n[a]]), s[a]);
-      (Us(t, l, o * 0.15, 0.5 * (0.5 + 0.5 * s[a]), i),
-        Us(t, l, o * 0.15 + 0.45, 0.14, i),
-        (o & 7) === 7 && (yield));
-    }
-    return t;
-  }
-  function* X8(i, e) {
-    let t = Fr.bar * 4,
-      n = new Float32Array(Math.round(t * i)),
-      s = () =>
-        Q1(
-          Math.round(0.9 * i),
-          [ei(i, 0.9, 74, 34, 0.07, 0.24, 0.002), 1],
-          [at(i, e, 0.4, 0.07, { lp: 240 }), 1.2],
-          [at(i, e, 0.05, 0.008, { bp: 1400, q: 0.8 }), 0.25],
-        ),
-      o = (a) =>
-        Q1(
-          Math.round(0.5 * i),
-          [ei(i, 0.5, a, a * 0.55, 0.05, 0.12, 0.002), 1],
-          [at(i, e, 0.1, 0.02, { lp: 600 }), 0.5],
-        ),
-      r = (a) => at(i, e, 0.06, 0.008 + a * 0.01, { hp: 6500 });
-    for (let a = 0; a < 4; a++) {
-      let l = a * 2.4;
-      (Us(n, s(), l, 1, i),
-        Us(n, o(104), l + 1.5, 0.55, i),
-        a % 2 === 1 && Us(n, s(), l + 2.1, 0.6, i));
-      for (let c = 0; c < 16; c++)
-        Us(
-          n,
-          r(c % 4 === 2 ? 1 : 0),
-          l + c * 0.15,
-          c % 4 === 2 ? 0.34 : c % 2 ? 0.11 : 0.2,
-          i,
-        );
-      yield;
-    }
-    for (let [a, l] of [
-      [12, 120],
-      [13, 104],
-      [14, 88],
-      [15, 74],
-    ])
-      Us(n, o(l), 7.2 + a * 0.15, 0.6, i);
-    return Wo(n, 1.3);
   }
   function $c(i, e, t) {
     let n = Math.round(t * i),
@@ -5949,21 +5650,6 @@ void main() {
     }
     return s;
   }
-  function* Y8(i) {
-    let e = Fr.bar * 8,
-      t = new Float32Array(Math.round(e * i));
-    for (let n = 0; n < 4; n++) {
-      let s = Cv[n];
-      for (let [o, r] of [
-        [12, 1],
-        [19, 0.7],
-        [24 + s.tones[1], 0.5],
-        [24, 0.4],
-      ])
-        (Us(t, $c(i, Ns(s.root + o), 4.7), n * 4.8 + 0.05, r * 0.3, i), yield);
-    }
-    return t;
-  }
   function Pf(i, e, t) {
     let n = dn(i, t, [
         [e, t * 0.3, 1],
@@ -5975,31 +5661,6 @@ void main() {
       s = Math.round(0.006 * i);
     for (let o = 0; o < s; o++) n[o] *= o / s;
     return em(n, i, 0, 0.2);
-  }
-  function* $8(i) {
-    let e = Fr.bar * 8,
-      t = new Float32Array(Math.round(e * i)),
-      n = (s, o, r) => {
-        let a = Pf(i, Ns(o), 3.2);
-        (Us(t, a, s, r, i),
-          Us(t, a, s + 0.45, r * 0.28, i),
-          Us(t, a, s + 0.9, r * 0.1, i));
-      };
-    for (let [s, o] of [
-      [0, 62],
-      [0.9, 69],
-      [1.8, 70],
-      [3, 65],
-    ])
-      (n(s, o, 0.5), yield);
-    for (let [s, o] of [
-      [0, 62],
-      [0.9, 69],
-      [1.8, 72],
-      [3, 67],
-    ])
-      (n(9.6 + s, o, 0.42), yield);
-    return t;
   }
   function* Z8(i) {
     let e = St(i, 2.8);
@@ -6364,6 +6025,8 @@ void main() {
         ref: 8,
         roll: 0.5,
       },
+      giga_bite_v2: { gen: bossMoveSample("giga_bite_v2"), n: 1, sr: 24000, peak: .9, bus: "world", max: 6, pri: 8, ref: 14, boot: true },
+      spino_death_v2: { gen: bossMoveSample("spino_death_v2"), n: 1, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 25, boot: true },
       spino_roar: { gen: spinoSample("spino_roar"), n: 2, sr: 24000, peak: .92, bus: "world", max: 1, pri: 9, ref: 18, boot: true },
       spino_death: { gen: spinoSample("spino_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 18, boot: true },
       spino_charge: { gen: spinoSample("spino_charge"), n: 1, sr: 24000, peak: .85, bus: "world", max: 1, pri: 9, ref: 16, boot: true },
@@ -6371,7 +6034,7 @@ void main() {
       spino_beam_loop: { gen: spinoSample("spino_beam_loop"), n: 1, sr: 24000, peak: .87, bus: "world", loop: true, ref: 18, boot: true },
       spino_beam_tail: { gen: spinoSample("spino_beam_tail"), n: 1, sr: 24000, peak: .83, bus: "world", max: 1, pri: 8, ref: 16, boot: true },
       giga_step: { gen: gigaSample("giga_step"), n: 4, sr: 24000, peak: .83, bus: "world", max: 3, pri: 5, ref: 9, boot: true },
-      giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 3, pri: 9, ref: 15, boot: true },
+      giga_roar: { gen: gigaSample("giga_roar"), n: 1, sr: 24000, peak: .92, bus: "world", max: 4, pri: 9, ref: 15, boot: true },
       giga_death: { gen: gigaSample("giga_death"), n: 1, sr: 24000, peak: .9, bus: "world", max: 1, pri: 9, ref: 15, boot: true },
       giga_foley: { gen: gigaSample("giga_foley"), n: 1, sr: 24000, peak: .65, bus: "world", loop: true, ref: 6, boot: true },
       giga_fire: { gen: gigaFireNoise, n: 1, sr: 24000, peak: .72, bus: "world", loop: true, ref: 10, boot: true },
@@ -6431,45 +6094,7 @@ void main() {
         ref: 12,
         roll: 0.5,
       },
-      relay_cut: {
-        gen: z8,
-        n: 1,
-        sr: Xn,
-        peak: 0.75,
-        bus: "world",
-        max: 2,
-        pri: 8,
-        ref: 6,
-        roll: 0.5,
-      },
       thunder: { gen: D8, n: 2, sr: pl, peak: 0.8, bus: "dry", max: 2, pri: 6 },
-      foghorn: {
-        gen: L8,
-        n: 1,
-        sr: pl,
-        peak: 0.5,
-        bus: "world",
-        max: 1,
-        pri: 2,
-      },
-      halyard: {
-        gen: F8,
-        n: 2,
-        sr: Xn,
-        peak: 0.3,
-        bus: "world",
-        max: 2,
-        pri: 1,
-      },
-      container_bang: {
-        gen: U8,
-        n: 1,
-        sr: pl,
-        peak: 0.6,
-        bus: "world",
-        max: 1,
-        pri: 2,
-      },
       ui_click: {
         gen: N8,
         n: 1,
@@ -6521,13 +6146,8 @@ void main() {
         pri: 9,
       },
       death: {
-        gen: K8,
-        n: 1,
-        sr: Xn,
-        peak: 0.75,
-        bus: "music",
-        max: 1,
-        pri: 9,
+        gen: () => Float32Array.from(new Int16Array(assetBytes(characterDeathVoice.pcm)), sample => sample / 32768),
+        n: 1, sr: 24000, peak: .9, bus: "dry", max: 1, pri: 10, boot: true,
       },
       ankylosaurus_servo: {
         gen: M8,
@@ -6538,24 +6158,7 @@ void main() {
         ref: 4,
         roll: 1,
       },
-      relay_hum: {
-        gen: w8,
-        n: 1,
-        sr: Xn,
-        peak: 0.4,
-        loop: 1,
-        ref: 2.5,
-        roll: 1.4,
-      },
-      rain: { gen: O8, n: 1, sr: Xn, peak: 0.5, loop: 1 },
-      rain_interior: { gen: H8, n: 1, sr: Xn, peak: 0.7, loop: 1 },
       wind: { gen: V8, n: 1, sr: pl, peak: 0.5, loop: 1 },
-      sea: { gen: W8, n: 1, sr: pl, peak: 0.5, loop: 1, ref: 10, roll: 0.6 },
-      music_drone: { gen: G8, n: 1, sr: Fr.sr, peak: 0.5, loop: 1, music: 1 },
-      music_ost: { gen: q8, n: 1, sr: Fr.sr, peak: 0.45, loop: 1, music: 1 },
-      music_perc: { gen: X8, n: 1, sr: Fr.sr, peak: 0.7, loop: 1, music: 1 },
-      music_brass: { gen: Y8, n: 1, sr: Fr.sr, peak: 0.45, loop: 1, music: 1 },
-      music_motif: { gen: $8, n: 1, sr: Fr.sr, peak: 0.45, loop: 1, music: 1 },
       ir_outdoor: { gen: Q8, n: 1, sr: ki, peak: 0.9, ir: 1 },
       ir_shed: { gen: eC, n: 1, sr: ki, peak: 0.9, ir: 1 },
     },
@@ -6636,7 +6239,6 @@ void main() {
     },
     tC = new Set([
       "thunder",
-      "foghorn",
       "objective",
       "objective_all",
       "complete",
@@ -6644,14 +6246,11 @@ void main() {
       "explosion",
       "rifle_tail_in",
       "ankylosaurus_die",
-      "relay_cut",
-      "container_bang",
       "ear_ring",
     ]),
     nC = [
       "ir_outdoor",
       "ir_shed",
-      "rain",
       "whiz",
       "reload_magout",
       "reload_magin",
@@ -6662,9 +6261,7 @@ void main() {
       "land",
       "jump",
       "hurt",
-      "music_drone",
       "wind",
-      "music_motif",
       "impact_enemy",
       "impact_wood",
       "impact_water",
@@ -6677,31 +6274,14 @@ void main() {
       "ankylosaurus_step",
       "ui_click",
       "ui_hover",
-      "sea",
-      "rain_interior",
-      "relay_hum",
       "ankylosaurus_die",
       "explosion",
       "ear_ring",
       "death",
-      "music_ost",
-      "music_perc",
-      "music_brass",
-      "relay_cut",
       "objective",
       "thunder",
       "objective_all",
       "complete",
-      "halyard",
-      "foghorn",
-      "container_bang",
-    ],
-    tm = [
-      "music_drone",
-      "music_ost",
-      "music_perc",
-      "music_brass",
-      "music_motif",
     ];
   function iC() {
     let i = () => {},
@@ -6804,7 +6384,7 @@ void main() {
           continue;
         }
         if (
-          (pe && (h(he.k, pe), d.shift(), be(he.name)),
+          (pe && (h(he.k, pe), d.shift()),
           performance.now() - te > 6)
         )
           break;
@@ -6908,7 +6488,7 @@ void main() {
     if (!i.level?.stub) arenaMusic?.select("ambient");
     let spinoCharging = false;
     const handlerBuffers = new Map();
-    const handlerGain = m(1.15);
+    const handlerGain = m(1.6);
     handlerGain.connect(H.dry);
     let handlerVoice = null;
 
@@ -6943,11 +6523,15 @@ void main() {
 
     function playHandlerVoice(key) {
       stopHandlerVoice();
-      if (!o() || !handlerAudio[key]) return;
+      const clip = key === "lowHealth" ? lowHealthVoice : key === "purple" ? gigaDuoVoice : handlerAudio[key];
+      if (!o() || !clip) return;
       if (!handlerBuffers.has(key)) {
-        const samples = new Int16Array(assetBytes(handlerAudio[key].pcm));
+        const samples = new Int16Array(assetBytes(clip.pcm));
         const buffer = e.createBuffer(1, samples.length, 24000);
-        buffer.getChannelData(0).set(Float32Array.from(samples, sample => sample / 32768));
+        buffer.getChannelData(0).set(Float32Array.from(samples, (sample, index) => {
+  const gain = key === "lowHealth" && index >= 70736 ? 0.7 : 1;
+  return Math.max(-1, Math.min(1, sample * gain / 32768));
+}));
         handlerBuffers.set(key, buffer);
       }
       handlerVoice = { buffer: handlerBuffers.get(key), offset: 0, source: null };
@@ -7004,7 +6588,6 @@ void main() {
       Y = 0,
       L = 0,
       Z = 0,
-      J = 1,
       oe = 1,
       fe = 0,
       le = -9,
@@ -7210,71 +6793,8 @@ void main() {
       }
       return ye;
     }
-    let Xe = { on: !1, layers: {} };
-    function Me() {
-      if (Xe.on || !o()) return;
-      for (let he of tm) if (!r.has(he + "#0")) return;
-      let te = e.currentTime + 0.08;
-      for (let he of tm) {
-        let pe = m(0),
-          ge = e.createBufferSource();
-        ((ge.buffer = r.get(he + "#0")),
-          (ge.loop = !0),
-          ge.connect(pe),
-          pe.connect(H.music),
-          ge.start(te),
-          (Xe.layers[he] = { g: pe, s: ge, c: 0 }));
-      }
-      ((Xe.on = !0), (Xe.t0 = te));
-    }
-    function we(te) {
-      return ee === "title"
-        ? [0.85, 0, 0, 0, 0.9]
-        : ee === "intro"
-          ? [0.8, 0, 0, 0, 0.6]
-          : ee === "dead"
-            ? [0.75, 0, 0, 0, 0]
-            : ee === "complete"
-              ? [0.6, 0, 0, 0, 0.7]
-              : [
-                  0.6 + 0.3 * te,
-                  Pv(0.05, 0.5, te) * 0.85,
-                  Pv(0.4, 0.8, te) * 0.95,
-                  Pv(0.62, 1, te) * 0.8,
-                  0,
-                ];
-    }
-    function be(te) {
-      Go[te].music && Me();
-    }
-    let Oe = {
-        rain: Be("rain", { gain: 0, fade: 2 }),
-        rainIn: Be("rain_interior", { gain: 0, fade: 2 }),
-        wind: Be("wind", { gain: 0, fade: 2 }),
-        sea: Be("sea", { gain: 0, pos: [33, -1, 0], fade: 2, bus: "amb" }),
-      },
-      pt = 0.4,
-      ut = 0.4,
-      nn = 2,
-      bt = {
-        fog: 14 + s() * 14,
-        hal: 4 + s() * 6,
-        bang: 20 + s() * 25,
-      };
-    function Os(te, he) {
-      let pe = 1 - 0.7 * P;
-      if ((bt.fog -= te) <= 0) {
-        bt.fog = 40 + s() * 30;
-        let ge = re.z + (s() * 2 - 1) * 250;
-        ze("foghorn", {
-          pos: [re.x + 320, 8, ge],
-          ref: 400,
-          gain: 0.34 * he * pe,
-          pitch: s() < 0.3 ? 0.89 : 1,
-          jitter: 0.01,
-        });
-      }
-    }
+    const wind = Be("wind", { gain: 0, fade: 2 });
+    let pt = 0.4, ut = 0.4, nn = 2;
     let pn = new Map(),
       Ti = 0;
     function ho(te) {
@@ -7361,41 +6881,6 @@ void main() {
         }
       }
     }
-    let $i = [];
-    function ya() {
-      for (let he of $i) he.h.stop(0.2);
-      $i = [];
-      let te = i.level && i.level.objectives;
-      Array.isArray(te) &&
-        te.forEach((he, pe) => {
-          he &&
-            he.pos &&
-            $i.push({
-              id: he.id,
-              index: pe,
-              pos: { x: he.pos.x, y: (he.pos.y || 0) + 1.2, z: he.pos.z },
-              h: Be("relay_hum", {
-                pos: [he.pos.x, (he.pos.y || 0) + 1.2, he.pos.z],
-                gain: 0.9,
-              }),
-            });
-        });
-    }
-    function ba(te) {
-      te = te || {};
-      let he = $i.findIndex((pe) => te.id != null && pe.id === te.id);
-      if (
-        (he < 0 &&
-          te.index != null &&
-          (he = $i.findIndex((pe) => pe.index === te.index)),
-        he >= 0)
-      ) {
-        let pe = $i[he];
-        (pe.h.stop(0.08),
-          $i.splice(he, 1),
-          ze("relay_cut", { pos: pe.pos, gain: 1 }));
-      } else ze("relay_cut", { gain: 0.8 });
-    }
     let Hn = (te) => (te && typeof te.x == "number" ? te : null);
     function fo(te) {
       let he = P;
@@ -7426,7 +6911,6 @@ void main() {
       let te = e.currentTime;
       ((le = te),
         te - R > 0.28 && fo(1),
-        (J = Math.min(J, 0.55)),
         Y > 0.3 && (Y = Math.min(1, Y + 0.015)));
     }),
       ln("weapon:dry", () => ze("rifle_dry", { gain: 0.9 })),
@@ -7538,9 +7022,8 @@ void main() {
           (Y = Math.min(1, Math.max(Y, 0.6) + 0.15)));
       }),
       ln("player:dead", () => {
-        (e.currentTime - _e > 1 &&
-          ((_e = e.currentTime), ze("death", { gain: 1, jitter: 0 })),
-          (Z = 1));
+        ze("death", { gain: 1, jitter: 0 });
+        Z = 1;
       }),
       ln("enemy:spawn", ({ enemy }) => {
         ho(enemy);
@@ -7654,10 +7137,10 @@ void main() {
           let ge = Math.hypot(pe.x - re.x, pe.y - re.y, pe.z - re.z);
           Z = Math.max(Z, pi(1 - (ge - 5) / 10, 0, 0.8));
         }
-        ((Y = Math.max(Y, 0.6)), (J = Math.min(J, 0.4)));
+        Y = Math.max(Y, 0.6);
       }),
       ln("objective:done", (te) => {
-        (ba(te), ze("objective", { delay: 0.35, gain: 1, jitter: 0 }));
+        ze("objective", { delay: 0.35, gain: 1, jitter: 0 });
       }),
       ln("objective:all", () =>
         ze("objective_all", { delay: 2.2, gain: 1, jitter: 0 }),
@@ -7673,7 +7156,8 @@ void main() {
         voice.end = now + .09;
       }
     }
-    ln("giga:roar", ({ pos }) => ze("giga_roar", { pos, gain: 1.7, ref: 23, jitter: 0 }));
+    ln("giga:roar", ({ pos }) => ze("giga_roar", { pos, gain: 2.3, ref: 23, jitter: 0 }));
+    ln("giga:bite", ({ pos }) => ze("giga_bite_v2", { pos, gain: 1.15, jitter: 0 }));
     ln("giga:death", ({ pos }) => {
       stopGigaRoar();
       ze("giga_death", { pos, gain: 1, jitter: 0 });
@@ -7706,7 +7190,7 @@ void main() {
       gigaFoleyLoop?.stop(.08);
       gigaFireLoop = gigaFoleyLoop = null;
       for (const voice of X.world) {
-        if (voice.name !== "giga_death" || voice.end <= e.currentTime) continue;
+        if (!["giga_death", "giga_bite_v2"].includes(voice.name) || voice.end <= e.currentTime) continue;
         voice.src.stop();
         voice.end = e.currentTime;
       }
@@ -7717,10 +7201,10 @@ void main() {
       spinoBeamLoop = null;
     }
     const spinoCues = {
-      roar: { name: "spino_roar", gain: 1.85, ref: 28 },
-      death: { name: "spino_death", gain: 1.25 },
-      charge: { name: "spino_charge", gain: 1.35 },
-      ignite: { name: "spino_beam_start", gain: 1.95, ref: 28 },
+      roar: { name: "spino_roar", gain: 3, ref: 28 },
+      deathV2: { name: "spino_death_v2", gain: 4, ref: 32 },
+      charge: { name: "spino_charge", gain: 3 },
+      ignite: { name: "spino_beam_start", gain: 3, ref: 28 },
       tail: { name: "spino_beam_tail", gain: 1.3 },
     };
     ln("arena:music", ({ track, gain }) => arenaMusic?.select(track, gain));
@@ -7771,7 +7255,7 @@ void main() {
         let he = ee;
         if (((ee = te.state || ee), ee === "playing" && he !== "paused")) {
           lastPainGrunt = -Infinity;
-          ((Y = 0), (Z = 0), ya());
+          ((Y = 0), (Z = 0));
           for (let pe of [...pn.keys()]) pe.alive === !1 && Rs(pe);
         }
         if (ee === "title") arenaMusic?.select("ambient");
@@ -7867,7 +7351,6 @@ void main() {
         !o())
       )
         return;
-      Me();
       let Le = e.currentTime;
       le > R + 0.02 && Le - le > 0.1 && fo(0.9);
       let ke = ee === "playing" || ee === "intro";
@@ -7881,32 +7364,13 @@ void main() {
         (w.gain.value = me),
         (nn -= te) <= 0 && ((nn = 3 + s() * 6), (ut = 0.12 + s() * 0.88)),
         (pt += (ut - pt) * ye(0.5)),
-        Oe.rain.setGain(fe * (1 - 0.93 * P) * 0.2),
-        Oe.rainIn.setGain(fe * P * 0.2),
-        Oe.wind.setGain(fe * (0.3 + 0.7 * pt) * (1 - 0.65 * P) * 0.75),
-        Oe.wind.setPitch(0.9 + 0.25 * pt),
-        Oe.sea.setGain(fe * (1 - 0.5 * P) * 1),
-        Oe.sea.setPos([33, -1, pi(re.z, -28, 26)]),
-        !ue &&
-          (ke || ee === "title" || ee === "complete") &&
-          Os(te, ee === "title" ? 0.7 : 1),
+        wind.setGain(fe * (0.3 + 0.7 * pt) * (1 - 0.65 * P) * 0.86),
+        wind.setPitch(0.9 + 0.25 * pt),
         ue || zo(te),
         (Y = Math.max(0, Y - te * (pn.size ? 0.045 : 0.14))));
       let ct =
         ke || ue ? Math.max(V, Re.autoIntensity ? Math.max(0.15, Y) : 0) : 0;
-      if (
-        ((L += (ct - L) * ye(2)),
-        (J += (1 - J) * ye(3.5)),
-        (O.gain.value = J * (ue ? 0.45 : 1) * (arenaMusic?.playing || ee === "title" || ee === "complete" ? 0 : 1)),
-        Xe.on)
-      ) {
-        let De = we(L),
-          it = ye(1 / 0.5);
-        for (let gt = 0; gt < tm.length; gt++) {
-          let Ot = Xe.layers[tm[gt]];
-          ((Ot.c += (De[gt] - Ot.c) * it), (Ot.g.gain.value = Ot.c));
-        }
-      }
+      L += (ct - L) * ye(2);
       for (let De of We)
         ((De.vC += (De.vT - De.vC) * ye(4)),
           (De.gC += (De.gT * De.vC - De.gC) * ye(De.rate)),
@@ -8094,7 +7558,7 @@ void main() {
             voices: te,
             loops: We.size,
             tracked: pn.size,
-            music: Xe.on,
+            music: !!arenaMusic?.playing,
             intensity: +L.toFixed(2),
             interior: +P.toFixed(2),
             gameState: ee,

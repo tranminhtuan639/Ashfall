@@ -86,7 +86,7 @@
       (t.scene = t.render.scene),
       (t.camera = t.render.camera),
       (t.viewCamera = t.render.viewCamera),
-      await Nr("Mixing paint, rust and rain", 0.12),
+      await Nr("Preparing arena materials", 0.12),
       await r("mats", "materials", () => Gg(t)),
       (t.physics = d3(t)),
       (t.props = Yg(t)),
@@ -150,10 +150,12 @@
           const assets = Promise.all([
             loadDefenseMesh(giganotosaurusData, true),
             akGoldTexture(gigaPurpleColor, lt.SRGBColorSpace),
+            loadGigaYellowMaps(),
           ]);
+          t.createReinforcementGiga = () => setupGiganotosaurus(t, { assets, reinforcement: true });
           const [gigas, spino] = await Promise.all([
-            Promise.all(Array.from({ length: 11 }, (_, index) =>
-              setupGiganotosaurus(t, { assets, reinforcement: index >= 5 && index < 9 }))),
+            Promise.all(Array.from({ length: 18 }, (_, index) =>
+              setupGiganotosaurus(t, { assets, reinforcement: index >= 6 && index < 14 }))),
             setupSpinosaurus(t),
           ]);
           t.spino = spino;

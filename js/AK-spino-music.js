@@ -104,7 +104,7 @@
   function createArenaMusic(context, destination) {
     const tracks = {
       boss: createArenaMusicTrack(context, destination, spinoThemeAudio, {
-        loopStart: 29.76, loopEnd: 81, volume: .65,
+        loopStart: 29.76, loopEnd: 81, volume: 1,
       }),
     };
     for (const [name, asset] of Object.entries(arenaMusicAudio)) {

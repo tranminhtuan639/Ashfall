@@ -11,7 +11,7 @@
     };
     const raptor = (side, hp = 180, scale = 1, targetPlayer = false) => ({ kind: "raptor", side, hp, scale, targetPlayer });
     const ankylo = (side, size, hp, count, childHp, boss = false) => ({ kind: "ankylosaurus", side, size, hp, count, childHp, boss });
-    const giga = (side, hp = 3500, purpleBoss = false, introRoar = false, boss = false) => ({ kind: "giga", side, hp, purpleBoss, introRoar, boss });
+    const giga = (side, hp = 5500, variant = "normal", giant = false) => ({ kind: "giga", side, hp, variant, giant });
     const ring = ["north", "west", "east"];
     const flanks = ["west", "east", "south"];
     const pack = (sides, count, targetPlayer = false) =>
@@ -30,30 +30,35 @@
       ],
       [
         [giga("west"), giga("east"), ankylo("south", 4, 1230, 2, 345), ankylo("south", 4, 1230, 2, 345)],
-        [giga("north", 7000, true, true, true)],
+        [giga("north", 30000, "purple", true), giga("south", 30000, "yellow", true)],
       ],
       [
-        [...pack(["north", "east"], 1, true), raptor("south", 3600, 3, true),
-          ankylo("west", 4, 1230, 2, 345), ankylo("south", 8, 2000, 3, 550),
-          giga("east"), giga("south", 4000, true, true)],
-        [{ kind: "spino", side: "east", hp: 30000 }],
+        [
+          giga("south"), giga("south", 20000, "purple"), giga("south", 20000, "yellow"),
+          ankylo("north", 4, 1230, 2, 345), ankylo("north", 8, 2000, 3, 550),
+          raptor("north", 180, 1, true), raptor("north", 180, 1, true), raptor("north", 3600, 3, true),
+          giga("west", 20000, "purple", true), giga("east", 20000, "yellow", true),
+        ],
+        [{ kind: "spino", side: "east", hp: 50000 }],
       ],
     ];
     const lines = {
       deploy: "Don't just stand there, Private! Slam [1] to deploy a sentry gun!",
       ankylo: "Contact! Mecha ankylos inbound! Watch out for those dorsal turrets!",
       giga: "Are you seeing this?! Two massive fire-breathing Gigas! Break out of that pincer before they roast you!",
-      purple: "Wait... what is that roar?! Oh hell—a massive purple Mecha-Giga! That thing's twice the size of the others!",
+      purple: "What is that roar?! Oh hell—two giant Mecha-Gigas, one purple and one yellow lightning! They're twice the size of the others!",
       mixed: "All of them at once?! How did we get here, huh?",
       spino: "This is it, Private—the alpha of them all! Bring down that Spinosaurus and we go home!",
-      firstCall: "Did that roar just summon TWO purple Gigas?! Focus the Spino before they overwhelm you!",
+      firstCall: "Did that roar just summon a purple AND a yellow Giga?! Focus the Spino before they overwhelm you!",
       halfCall: "It's below half health and calling for backup! Two Gigas just spawned on the West and East flanks—watch your sides, Private!",
       repeatCall: "What?! That wasn't in our intel! Ignore the Gigas—focus on the Apex Spinosaurus!",
       repeatAgain: "What the—?! It can do that again?!",
       extract: "Target neutralized! Outstanding work, Private. Head back to the rig and press [2] to extract!",
     };
     function radio(key) {
-      hud.radio(lines[key], handlerAudio[key].seconds + .25, key);
+      const clip = key === "purple" ? gigaDuoVoice : handlerAudio[key];
+      if (key === "firstCall") hud.radio(lines[key], 5);
+      else hud.radio(lines[key], (clip?.seconds ?? 4.5) + .25, clip ? key : null);
     }
     function queueReinforcements(specs, line) {
       const batch = { remaining: specs.length, line };
@@ -61,11 +66,32 @@
     }
     const ankyloAlive = new Map();
     const pending = [];
-    const purpleSlots = gigas.slice(5, 9);
+    const mixedSlots = [...gigas.slice(3, 6), ...gigas.slice(16, 18)];
+    const minionSlots = gigas.slice(6, 10);
+    const giantSlots = gigas.slice(10, 12);
+    const normalSlots = gigas.slice(12, 14);
+    const duoSlots = gigas.slice(14, 16);
+    const duo = [];
+    let normalSlotPending = false;
+    function requestNormalSlot() {
+      if (normalSlotPending || !game.createReinforcementGiga) return;
+      normalSlotPending = true;
+      game.createReinforcementGiga().then(unit => {
+        normalSlots.push(unit);
+        gigas.push(unit);
+        units.push(unit);
+      }).catch(error => console.error("[campaign] Could not add Giga reserve", error))
+        .finally(() => { normalSlotPending = false; });
+    }
+    const coloredPair = () => [
+      { ...giga("north", 5500, "purple"), reinforcement: "minion" },
+      { ...giga("south", 5500, "yellow"), reinforcement: "minion" },
+    ];
     let stage, wave, countdown, extract, active, boss, summoned, entryElapsed, deployAnnounced, ankyloAnnounced;
     let purpleSummons;
     function reset() {
       purpleSummons = 0;
+      duo.length = 0;
       game.events.emit("arena:music", { track: null });
       stage = wave = 0;
       countdown = 12;
@@ -98,14 +124,16 @@
     function spawn(spec) {
       const occupied = [...ankyloAlive.keys()].map(enemy => enemy.pos);
       for (const unit of raptors) if (unit.alive) occupied.push(unit.position);
+      for (const unit of gigas) if (unit.alive) occupied.push(unit.position);
       const pos = openPoint(spec.pos || gates[spec.side], occupied);
       if (!pos) return false;
+      const hp = Math.max(1, Math.round(spec.hp * (game.runDifficulty?.enemyHealth ?? 1)));
       if (spec.kind === "raptor") {
         const unit = raptors.find(raptor => !raptor.started || raptor.done);
         if (!unit) return false;
-        unit.start(pos, spec);
+        unit.start(pos, { ...spec, hp });
       } else if (spec.kind === "ankylosaurus") {
-        const enemy = game.enemies.spawn("ankylosaurus", pos, { size: spec.size, hp: spec.hp,
+        const enemy = game.enemies.spawn("ankylosaurus", pos, { size: spec.size, hp,
           state: "alert", target: player.pos, damageScale: spec.size === 1 ? .2 : 1,
           yaw: Math.atan2(player.pos.x - pos.x, player.pos.z - pos.z) });
         if (!enemy) return false;
@@ -114,27 +142,33 @@
           ankyloAnnounced = true;
           radio("ankylo");
         }
-        if (spec.boss) boss = { unit: enemy, hp: spec.hp, kind: spec.kind };
+        if (spec.boss) boss = { unit: enemy, hp, kind: spec.kind };
       } else if (spec.kind === "giga") {
-        const slots = spec.reinforcement === "purple" ? purpleSlots
-          : spec.reinforcement === "normal" ? gigas.slice(9) : stage === 3 ? gigas.slice(3, 5) : gigas.slice(0, 3);
-        const unit = slots.find(giga => giga.available);
-        if (!unit) return false;
-        unit.start(pos, spec.hp, { ...spec, corpse: 15, invulnerableIntro: spec.boss || !!spec.reinforcement });
-        if (spec.boss) boss = { unit, hp: spec.hp, kind: spec.kind };
+        const slots = spec.reinforcement === "minion" ? minionSlots
+          : spec.reinforcement === "giant" ? giantSlots
+          : spec.reinforcement === "normal" ? normalSlots
+          : stage === 3 ? mixedSlots : wave === 1 ? duoSlots : gigas.slice(0, 3);
+        const unit = slots.find(giga => giga.available)
+          || (spec.reinforcement && slots.find(giga => giga.done));
+        if (!unit) {
+          if (spec.reinforcement === "normal") requestNormalSlot();
+          return false;
+        }
+        unit.start(pos, hp, { ...spec, corpse: 15 });
+        if (stage === 2 && wave === 1) duo[spec.variant === "yellow" ? 1 : 0] = unit;
       } else {
         spino.start(pos, position => {
           summoned = true;
           purpleSummons = 1;
-          boss = { unit: spino, hp: spec.hp, kind: spec.kind };
-          queueReinforcements([-10, 10].map(z => ({
-            ...giga("east", 5500, true, true), pos: position.clone().add(new W(-6, 0, z)),
-            reinforcement: "purple",
+          boss = { unit: spino, hp, kind: spec.kind };
+          queueReinforcements(coloredPair().map((minion, index) => ({
+            ...minion, pos: position.clone().add(new W(-6, 0, index ? 10 : -10)),
           })), "firstCall");
-        }, spec.hp, () => {
-          queueReinforcements(["east", "west"].map(side => ({
-            ...giga(side, 3500, false, true), reinforcement: "normal",
-          })), "halfCall");
+        }, hp, () => {
+          queueReinforcements([
+            { ...giga("west", 7000, "purple", true), reinforcement: "giant" },
+            { ...giga("east", 7000, "yellow", true), reinforcement: "giant" },
+          ], "halfCall");
         });
       }
       return true;
@@ -156,7 +190,7 @@
       if (stage === 1) return "You are the objective. Scrap those mecha ankylos or die trying.";
       if (stage === 2) return wave === 0
         ? "Survive the inferno. Extinguish the blazing Giganotosauruses or become ash"
-        : "The inferno isn't over. Shut down the purple beast!";
+        : "The inferno isn't over. Shut down both giant Mecha-Gigas!";
       return "How Did We Get Here?";
     }
     function queueWave() {
@@ -227,20 +261,35 @@
       }
       if (!player.alive) return false;
       if (stage === 0 && transport.health <= 0) { failTransport(); return false; }
-      if (summoned && spino.alive && !purpleSlots.some(unit => unit.alive) &&
-          !pending.some(spec => spec.reinforcement === "purple")) {
+      if (summoned && spino.alive && !minionSlots.some(unit => unit.alive) &&
+          !pending.some(spec => spec.reinforcement === "minion")) {
         spino.summonReinforcements(() => {
-          queueReinforcements(["north", "south"].map(side => ({
-            ...giga(side, 5500, true, true), reinforcement: "purple",
-          })), ++purpleSummons === 2 ? "repeatCall" : "repeatAgain");
+          const specs = coloredPair();
+          if (++purpleSummons >= 3) {
+            for (const side of ["west", "east"]) {
+              specs.push({ ...giga(side, 3500, "normal"), reinforcement: "normal" });
+            }
+          }
+          queueReinforcements(specs, purpleSummons === 2 ? "repeatCall" : "repeatAgain");
         });
       }
-      const hp = boss && !boss.unit.invulnerable && (boss.kind === "ankylosaurus" ? (ankyloAlive.has(boss.unit) ? boss.unit.hp : 0) : boss.unit.health);
-      hud.setBossHealth(hp > 0 ? hp / boss.hp : null);
+      if (stage === 2 && wave === 1) {
+        const showDuo = duo[0] && duo[1] && duo.every(unit => !unit.invulnerable);
+        const visible = showDuo && duo.some(unit => unit.alive);
+        hud.setBossHealth(visible ? {
+          variant: "duo", left: duo[0].health / duo[0].maxHealth, right: duo[1].health / duo[1].maxHealth,
+        } : null);
+      } else {
+        const hp = boss && !boss.unit.invulnerable && (boss.kind === "ankylosaurus"
+          ? (ankyloAlive.has(boss.unit) ? boss.unit.hp : 0) : boss.unit.health);
+        const fill = hp > 0 ? hp / boss.hp : null;
+        hud.setBossHealth(fill != null && boss.kind === "spino"
+          ? { variant: "spino", left: fill, right: fill } : fill);
+      }
       if (pending.length || ankyloAlive.size || raptors.some(unit => unit.alive) ||
           gigas.some(unit => unit.alive) || (spino.started && (!summoned || !spino.done))) return true;
 
-      if (stage === 2 && wave === 1 && !boss?.unit.done) return true;
+      if (stage === 2 && wave === 1 && !duo.every(unit => unit.done)) return true;
       if (stage === 3 && wave === 1) {
         extract = true;
         game.events.emit("arena:music", { track: "ambient" });

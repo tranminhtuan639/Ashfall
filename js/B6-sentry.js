@@ -5,10 +5,10 @@
   function createArenaSentries(game) {
     const sentries = [];
     const range = 27;
-    const damage = 6;
+    const damage = 7;
     const interval = .2;
-    const secondShotDelay = .075;
-    const scale = 1.15 * 1.2 * 1.2;
+    const secondShotDelay = .055;
+    const scale = 1.15 * 1.2 * 1.36;
     const clearance = 1.08 * 1.2;
     const gunModel = game.sentryGun;
     const position = new W(), forward = new W();
@@ -75,7 +75,8 @@
       base.add(pivot);
       base.position.copy(position);
       base.scale.setScalar(scale);
-      if (sentries.length === 3) remove(sentries.shift(), true);
+      const limit = game.runDifficulty?.sentryLimit ?? 4;
+      if (sentries.length >= limit) remove(sentries.shift(), true);
       game.scene.add(base);
       sentries.push({ base, pivot, cooldown: .2, followUp: null });
       return true;

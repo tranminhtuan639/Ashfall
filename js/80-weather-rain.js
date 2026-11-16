@@ -419,12 +419,11 @@
     );
   }
   var TR = `
-uniform float uTime, uRain, uWetG, uReflOn, uReflLod, uMarkRes, uMaskRes;
+uniform float uTime, uWetG, uReflOn, uReflLod, uMarkRes, uMaskRes;
 uniform sampler2D uMask, uMarks, uDetail, uDetailN, uRefl;
 uniform vec3 uMaskRect; uniform vec4 uMarkRect; uniform mat4 uReflMatrix; uniform vec2 uReflScale;
 varying vec3 vGWorld;
 float gRough; vec2 gNxz; float gPuddle; float gWet; float gFilm; float gSoak;
-vec3 gHash3(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q += dot(q, q.yzx + 33.33); return fract((q.xxy + q.yzz) * q.zyx); }
 float gH1(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float gVN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(gH1(i), gH1(i + vec2(1.0, 0.0)), f.x), mix(gH1(i + vec2(0.0, 1.0)), gH1(i + vec2(1.0, 1.0)), f.x), f.y); }
@@ -437,26 +436,6 @@ vec4 gBicubic(sampler2D t, vec2 uv, float res){
   vec2 h0 = (i + w1 / g0 - 0.5) / res, h1 = (i + w3 / g1 + 1.5) / res;
   return (textureLod(t, vec2(h0.x, h0.y), 0.0) * g0.x + textureLod(t, vec2(h1.x, h0.y), 0.0) * g1.x) * g0.y
        + (textureLod(t, vec2(h0.x, h1.y), 0.0) * g0.x + textureLod(t, vec2(h1.x, h1.y), 0.0) * g1.x) * g1.y;
-}
-// one sparse layer of rain rings: every cell gets a new drop (position, size, strength) each cycle, thin soft crest
-// that fades as it expands. Returns a slope (xz) contribution.
-vec2 gRipple(vec2 p, float t, float cell, float seed){
-  vec2 q = p / cell + seed * 17.3; vec2 id = floor(q); vec2 f = fract(q);
-  vec3 h0 = gHash3(id + seed);
-  float tt = t * (0.5 + 0.55 * h0.x) + h0.y * 9.0;
-  float cyc = floor(tt), life = fract(tt);
-  vec3 h = gHash3(id + seed + cyc * 7.31);
-  vec3 hc = gHash3(id.yx + cyc * 3.71 + seed * 5.0);
-  float on = step(h.z, 0.16 + 0.5 * uRain);
-  float rmax = mix(0.1, 0.36, h.x * h.x);
-  vec2 c = mix(vec2(rmax + 0.05), vec2(0.95 - rmax), hc.xy);
-  vec2 dv = (f - c) * cell; float d = length(dv);
-  float r = life * rmax * cell;
-  float w = 0.005 + 0.02 * life;
-  float x = (d - r) / w;
-  float ring = x * exp(-x * x) * 2.3;
-  float amp = 1.0 - life; amp = amp * amp * on * mix(0.3, 1.0, h.y) * smoothstep(0.0, 0.06, life);
-  return (dv / max(d, 1e-4)) * ring * amp;
 }
 `,
     AR = `
@@ -558,16 +537,7 @@ vec2 gRipple(vec2 p, float t, float cell, float seed){
   vec2 wv = texture2D(uDetailN, gxz * 0.13 + uTime * vec2(0.031, 0.017)).ba - 0.5;
   vec2 wv2 = texture2D(uDetailN, gxz.yx * 0.31 - uTime * vec2(0.043, 0.027)).ba - 0.5;
   if (wsum > 0.004) {
-    float rf = 1.0 - smoothstep(10.0, 34.0, gDist);
-    vec2 rip = vec2(0.0);
-    if (rf > 0.0) {
-      vec2 gp2 = vec2(0.8 * gxz.x - 0.6 * gxz.y, 0.6 * gxz.x + 0.8 * gxz.y);
-      vec2 r2 = gRipple(gp2, uTime * 0.87, 1.31, 2.0);
-      rip = gRipple(gxz, uTime, 0.83, 1.0) + vec2(0.8 * r2.x + 0.6 * r2.y, -0.6 * r2.x + 0.8 * r2.y) * 0.9 + gRipple(gxz.yx, uTime * 1.13, 0.57, 3.0).yx * 0.6;
-      rip *= rf * (0.3 + 0.7 * uRain) * 0.3 * smoothstep(0.0, 0.08, depth);
-    }
-    nxz += (rip + (wv * 0.03 + wv2 * 0.018) * (0.4 + 0.6 * deep)) * wsum;
-    rough += (1.0 - rf) * 0.03 * puddle * uRain;
+    nxz += (wv * 0.03 + wv2 * 0.018) * (0.4 + 0.6 * deep) * wsum;
   }
   gSoak = soak;
   gRough = rough; gNxz = nxz; gPuddle = puddle; gWet = wet; gFilm = film;
@@ -604,7 +574,6 @@ vec2 gRipple(vec2 p, float t, float cell, float seed){
   function Ib(i, e) {
     let t = {
         uTime: { value: 0 },
-        uRain: { value: 0.6 },
         uWetG: (i.mats && i.mats.uniforms && i.mats.uniforms.wet) || {
           value: 1,
         },
@@ -802,216 +771,12 @@ vec2 gRipple(vec2 p, float t, float cell, float seed){
       (i[4] = (2 * Math.PI) / i[2]),
       (i[5] = Math.sqrt(9.81 * i[4])));
   }
-  var fi = (i) => (Number.isInteger(i) ? i.toFixed(1) : i.toFixed(5));
   function Lb(i, e, t) {
     let n = 1 - bs.smoothstep(Math.hypot(i - 30, e), 50, 220),
       s = 0;
     for (let o of B1)
       s += o[3] * Math.sin(o[4] * (o[0] * i + o[1] * e) - o[5] * t);
     return oi.seaY + s * n;
-  }
-  var CR = B1.map(
-      (i) =>
-        `  { float ph = ${fi(i[4])} * dot(vec2(${fi(i[0])}, ${fi(i[1])}), swp.xz) - ${fi(i[5])} * uTime; sdisp.y += ${fi(i[3])} * sin(ph); sdisp.xz += vec2(${fi(i[0])}, ${fi(i[1])}) * (${fi(i[3] * 0.6)} * cos(ph)); }`,
-    ).join(`
-`),
-    PR = B1.map(
-      (i) =>
-        `  slopeA += vec2(${fi(i[0])}, ${fi(i[1])}) * (${fi(i[3] * i[4])} * cos(${fi(i[4])} * dot(vec2(${fi(i[0])}, ${fi(i[1])}), sxz) - ${fi(i[5])} * uTime));`,
-    ).join(`
-`),
-    IR = Db.map(
-      (i) =>
-        `  slopeB += vec2(${fi(i[0])}, ${fi(i[1])}) * (${fi(i[3] * i[4])} * cos(${fi(i[4])} * dot(vec2(${fi(i[0])}, ${fi(i[1])}), sxz) - ${fi(i[5])} * uTime));`,
-    ).join(`
-`),
-    zR = `
-uniform float uTime; uniform sampler2D uDetail, uDetailN; uniform vec3 uHazeA, uHazeB, uSunDirW;
-varying vec3 vGWorld; varying float vSAmp;
-float gRough; vec2 gNxz; float gOcc; float gSDist; float gSpark;
-`,
-    DR = `
-{
-  vec2 sxz = vGWorld.xz;
-  float sd = length(cameraPosition - vGWorld); gSDist = sd;
-  vec2 slopeA = vec2(0.0), slopeB = vec2(0.0);
-${PR}
-${IR}
-  float nearB = 1.0 - smoothstep(25.0, 110.0, sd);
-  vec2 t1 = texture2D(uDetailN, sxz * 0.113 + uTime * vec2(-0.021, 0.009)).ba - 0.5;
-  vec2 t2 = texture2D(uDetailN, sxz * 0.031 + uTime * vec2(-0.007, -0.004)).ba - 0.5;
-  vec2 t3 = texture2D(uDetailN, sxz.yx * 0.39 + uTime * vec2(0.031, -0.027)).ba - 0.5;
-  gNxz = slopeA * vSAmp + slopeB * nearB + t1 * 0.2 + t2 * 0.24 + t3 * 0.1 * nearB;
-  // foam / scum along the quay wall (x = 30) and around the moored hull x[33,49] z[-60,-9]
-  float dq = sxz.x - 30.0;
-  vec2 hq = abs(sxz - vec2(41.0, -34.5)) - vec2(4.0, 21.5);
-  float dh = length(max(hq, 0.0)) + min(max(hq.x, hq.y), 0.0) - 4.0;
-  float de = min(dq, dh);
-  vec4 fn = texture2D(uDetail, sxz * 0.41 + uTime * vec2(-0.012, 0.007));
-  vec4 fn2 = texture2D(uDetail, sxz * 0.093 + uTime * vec2(0.004, 0.003));
-  float band = 1.0 - smoothstep(0.0, 0.2 + fn2.g * fn2.g * 2.2, de);
-  float foam = clamp(band * smoothstep(0.5, 0.68, fn.a * 0.55 + fn.r * 0.25 + fn2.g * 0.3 + band * 0.2), 0.0, 1.0) * step(-0.3, de);
-  float scum = (1.0 - smoothstep(0.0, 5.0, de)) * smoothstep(0.4, 0.7, fn2.g);
-  vec3 alb = vec3(0.0045, 0.013, 0.017);
-  alb = mix(alb, vec3(0.03, 0.04, 0.034), scum * 0.6);
-  alb = mix(alb, vec3(0.3, 0.32, 0.3), foam * 0.7);
-  diffuseColor.rgb *= alb;
-  // wind structure: broad cat's-paw patches (ruffled, darker, duller) between calmer slicks, plus long swell shading
-  vec4 fn3 = texture2D(uDetail, sxz * 0.0123 + uTime * vec2(0.0016, 0.0011));
-  float gust = smoothstep(0.38, 0.62, fn2.g * 0.45 + fn3.g * 0.75 - 0.1);
-  float swell = sin(dot(sxz, vec2(-0.118, 0.05)) - uTime * 0.55 + fn3.a * 5.0) * 0.5 + 0.5;
-  gNxz = gNxz * mix(0.4, 1.35, gust) + vec2(-0.92, 0.39) * (swell - 0.5) * 0.07;
-  gSpark = mix(0.55, 1.0, swell) * mix(1.0, 0.6, gust);
-  diffuseColor.rgb *= mix(1.0, 0.6, gust);
-  gRough = mix(mix(0.1, 0.32, smoothstep(12.0, 380.0, sd)) * mix(0.62, 1.5, gust), 0.65, max(foam, scum * 0.3));
-  gNxz *= 1.0 - foam * 0.6;
-  gOcc = mix(0.3, 1.0, smoothstep(0.0, 8.0, de)) * mix(0.8, 1.05, swell);
-}
-`,
-    LR = `
-{
-  vec3 sdir = normalize(vGWorld - cameraPosition);
-  float toSun = pow(max(dot(normalize(sdir.xz + vec2(1e-5)), normalize(uSunDirW.xz)), 0.0), 3.0);
-  vec3 hz = mix(uHazeA, uHazeB, toSun);
-  outgoingLight = mix(outgoingLight, hz, smoothstep(220.0, 860.0, gSDist) * 0.8);
-}
-`;
-  function gv(i, e, t, n, s) {
-    let o = [i],
-      r = i,
-      a = t;
-    for (; r < e - 0.001; )
-      ((r = Math.min(e, r + a)), o.push(r), (a = Math.min(s, a * n)));
-    return o;
-  }
-  function kb(i, e) {
-    let t = oi.seaY,
-      n = gv(27.5, 880, 0.75, 1.075, 120),
-      s = gv(48, 880, 0.9, 1.085, 120),
-      r = s
-        .map((M) => -M)
-        .reverse()
-        .concat(gv(-48 + 0.9, 48 - 0.9, 0.9, 1, 0.9), s.slice(0)),
-      a = n.length,
-      l = r.length,
-      c = 12,
-      u = new Float32Array((a * l + c) * 3),
-      h = [],
-      f = 0;
-    for (let M = 0; M < l; M++)
-      for (let E = 0; E < a; E++)
-        ((u[f++] = n[E]), (u[f++] = t), (u[f++] = r[M]));
-    for (let M = 0; M < l - 1; M++)
-      for (let E = 0; E < a - 1; E++) {
-        let w = M * a + E,
-          S = w + 1,
-          z = w + a,
-          H = z + 1;
-        h.push(w, z, S, S, z, H);
-      }
-    let p = (M, E, w, S) => {
-      let z = f / 3;
-      for (let [H, O] of [
-        [M, E],
-        [w, E],
-        [M, S],
-        [w, S],
-      ])
-        ((u[f++] = H), (u[f++] = t), (u[f++] = O));
-      h.push(z, z + 2, z + 1, z + 1, z + 2, z + 3);
-    };
-    (p(-880, -880, 27.5, -158),
-      p(-880, 158, 27.5, 880),
-      p(-880, -158, -158, 158));
-    let d = new nt();
-    d.setAttribute("position", new et(u, 3));
-    let v = new Float32Array(u.length);
-    for (let M = 1; M < v.length; M += 3) v[M] = 1;
-    (d.setAttribute("normal", new et(v, 3)),
-      d.setIndex(h),
-      (d.boundingSphere = new Dn(new W(0, t, 0), 1300)));
-    let g = en.horizonAway.clone().multiplyScalar(0.85),
-      x = en.horizon.clone().multiplyScalar(0.8),
-      y = {
-        uTime: { value: 0 },
-        uDetail: { value: e.detail },
-        uDetailN: { value: e.detailN },
-        uHazeA: { value: g },
-        uHazeB: { value: x },
-        uSunDirW: { value: Mn.dir.clone() },
-      },
-      b = new Qt({ color: 16777215, roughness: 0.1, metalness: 0 });
-    ((b.name = "sea"),
-      (b.onBeforeCompile = (M) => {
-        (Object.assign(M.uniforms, y),
-          (M.vertexShader =
-            `uniform float uTime; varying vec3 vGWorld; varying float vSAmp;
-` +
-            M.vertexShader.replace(
-              "#include <begin_vertex>",
-              `#include <begin_vertex>
-  vec3 swp = (modelMatrix * vec4(transformed, 1.0)).xyz;
-  vSAmp = 1.0 - smoothstep(50.0, 220.0, distance(swp.xz, vec2(30.0, 0.0)));
-  vec3 sdisp = vec3(0.0);
-${CR}
-  transformed += sdisp * vSAmp;
-  vGWorld = swp;`,
-            )),
-          (M.fragmentShader = M.fragmentShader
-            .replace(
-              "#include <common>",
-              `#include <common>
-` + zR,
-            )
-            .replace("#include <map_fragment>", DR)
-            .replace(
-              "#include <roughnessmap_fragment>",
-              "float roughnessFactor = gRough;",
-            )
-            .replace(
-              "#include <normal_fragment_maps>",
-              `#include <normal_fragment_maps>
-  normal = normalize(mat3(viewMatrix) * normalize(vec3(-gNxz.x, 1.0, -gNxz.y)));`,
-            )
-            .replace(
-              "#include <lights_fragment_maps>",
-              `#include <lights_fragment_maps>
-  radiance *= gOcc; iblIrradiance *= gOcc;`,
-            )
-            .replace(
-              "#include <lights_fragment_end>",
-              `#include <lights_fragment_end>
-  { // sun glitter: strongest along the sun's azimuth, calmer to the sides; broken by swell and cat's paws
-    vec3 sv = normalize(vGWorld - cameraPosition);
-    float az = max(dot(normalize(sv.xz + vec2(1e-5)), normalize(uSunDirW.xz)), 0.0);
-    reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(40.0)) * gSpark * mix(0.3, 1.0, az * az * az);
-  }`,
-            )
-            .replace(
-              "#include <opaque_fragment>",
-              LR +
-                `
-#include <opaque_fragment>`,
-            )));
-      }),
-      (b.customProgramCacheKey = () => "saltline-sea-1"));
-    let m = new Qe(d, b);
-    ((m.name = "sea"),
-      (m.receiveShadow = !0),
-      (m.castShadow = !1),
-      (m.frustumCulled = !1),
-      (m.matrixAutoUpdate = !1));
-    let A = new Qt({ color: 724238, roughness: 0.55, metalness: 0 }),
-      _ = new Qe(
-        new rn(320, 4.4).rotateY(Math.PI / 2).translate(29.88, -2.18, 0),
-        A,
-      );
-    return (
-      (_.name = "quaySkirt"),
-      (_.receiveShadow = !0),
-      (_.matrixAutoUpdate = !1),
-      { mesh: m, skirt: _, uniforms: y, material: b }
-    );
   }
   var Ub = `
 uniform vec3 uBoxMin[4]; uniform vec3 uBoxMax[4];
@@ -1022,7 +787,7 @@ bool wInside(vec3 p){
 float wPhase(float c){ float g = 0.72; return (1.0 - g * g) / (12.566 * pow(1.0 + g * g - 2.0 * g * c, 1.5)); }
 `,
     kR = `
-uniform float uTime, uRain, uPix, uDrip; uniform vec3 uVel, uBox, uSunDir, uSunCol, uAmb;
+uniform float uTime, uRain, uPix; uniform vec3 uVel, uBox, uSunDir, uSunCol, uAmb;
 attribute vec4 aSeed;
 varying vec3 vCol; varying float vA; varying vec2 vUv;
 ${Ub}
@@ -1036,21 +801,13 @@ void main(){
   float sp = 0.82 + 0.36 * aSeed.w;
   vec3 vel = uVel * sp;
   vec3 p; float len; float kill = 0.0;
-  if (aSeed.w < 0.0) {                       // eave drip line (shed south eave), free-fall from 7 m
-    float T = 1.19; float t = fract(uTime / T * (0.9 + 0.2 * aSeed.y) + aSeed.z) * T;
-    p = vec3(mix(-16.0, 12.0, aSeed.x), 7.0 - 4.9 * t * t, -10.72 + 0.05 * sin(aSeed.x * 911.0));
-    vel = vec3(0.0, -9.81 * t - 0.3, 0.0); len = 0.022 * length(vel) + 0.03;
-    kill = 1.0 - uDrip;
-    if (fract(aSeed.x * 37.7) > 0.55 + 0.45 * uRain) kill = 1.0;
-  } else {
-    p = aSeed.xyz * uBox + vel * uTime;
-    p = mod(p - cameraPosition + 0.5 * uBox, uBox) - 0.5 * uBox + cameraPosition;
-    p += vec3(sin(uTime * 0.9 + aSeed.x * 40.0), 0.3 * sin(uTime * 0.7 + aSeed.y * 30.0), cos(uTime * 0.8 + aSeed.z * 35.0)) * 0.6;   // ash flutters on the wind
-    len = max(0.06, 0.02 * length(vel));
-    if (fract(aSeed.w * 7.13 + aSeed.x) > uRain) kill = 1.0;
-    if (wInside(p) && !wSky(p)) kill = 1.0;
-  }
-  if (p.y < (p.x > 30.0 ? -1.6 : 0.0)) kill = 1.0;
+  p = aSeed.xyz * uBox + vel * uTime;
+  p = mod(p - cameraPosition + 0.5 * uBox, uBox) - 0.5 * uBox + cameraPosition;
+  p += vec3(sin(uTime * 0.9 + aSeed.x * 40.0), 0.3 * sin(uTime * 0.7 + aSeed.y * 30.0), cos(uTime * 0.8 + aSeed.z * 35.0)) * 0.6;   // ash flutters on the wind
+  len = max(0.06, 0.02 * length(vel));
+  if (fract(aSeed.w * 7.13 + aSeed.x) > uRain) kill = 1.0;
+  if (wInside(p) && !wSky(p)) kill = 1.0;
+  if (p.y < 0.0) kill = 1.0;
   vec3 dir = normalize(vel);
   vec3 toP = p - cameraPosition; float dist = length(toP);
   vec3 side = normalize(cross(dir, toP));
@@ -1070,54 +827,8 @@ varying vec3 vCol; varying float vA; varying vec2 vUv;
 void main(){
   float r = length(vec2(vUv.x * 2.0, (vUv.y - 0.5) * 2.0));
   gl_FragColor = vec4(vCol, vA * smoothstep(1.0, 0.25, r));
-}`,
-    UR = `
-uniform float uTime, uRain; uniform vec3 uSunDir, uSunCol, uAmb, uMaskRect; uniform sampler2D uMask;
-attribute vec4 aSeed;
-varying vec3 vCol; varying float vA; varying vec2 vUv; varying float vLife;
-${Ub}
-vec2 sHash(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
-void main(){
-  vUv = position.xy;
-  float period = 0.26 + 0.14 * aSeed.z;
-  float tt = uTime / period + aSeed.w * 10.0; float cyc = floor(tt); float life = fract(tt);
-  vec2 r = sHash(aSeed.xy * 91.7 + cyc * 0.371);
-  vec2 rr = r - 0.5; rr *= 0.35 + 1.3 * abs(rr);                    // denser near the player
-  vec2 snap = floor(cameraPosition.xz / 4.0) * 4.0;
-  vec3 p = vec3(snap.x + rr.x * 30.0, 0.0, snap.y + rr.y * 30.0);
-  float kill = 0.0;
-  vec2 muv = (p.xz - uMaskRect.xy) * uMaskRect.z;
-  float inM = step(0.0, muv.x) * step(muv.x, 1.0) * step(0.0, muv.y) * step(muv.y, 1.0);
-  float pud = step(textureLod(uMask, muv, 0.0).r, 0.49) * inM;
-  float k = fract(aSeed.w * 5.3 + cyc * 0.17);
-  if (pud < 0.5 && k > 0.3) kill = 1.0;
-  if (k > 0.2 + 0.8 * uRain) kill = 1.0;
-  if (p.x > 29.7 || wInside(p + vec3(0.0, 0.2, 0.0))) kill = 1.0;
-  float sz = mix(0.04, 0.08, aSeed.z) * mix(0.65, 1.0, pud);
-  float wd = sz * (0.7 + 1.5 * life), ht = sz * (0.4 + 1.3 * sin(life * 3.14159));
-  vec3 toP = p - cameraPosition; float dist = length(toP);
-  vec3 side = normalize(vec3(toP.z, 0.0, -toP.x));
-  vec3 wp = p + side * (wd * position.x * 2.0) + vec3(0.0, ht * position.y + 0.004, 0.0);
-  float c = dot(toP / max(dist, 1e-3), uSunDir);
-  vCol = uAmb * 1.4 + uSunCol * wPhase(c) * 0.8;
-  vA = (1.0 - life) * (1.0 - smoothstep(11.0, 15.0, dist)) * mix(0.5, 1.0, pud);
-  vLife = life;
-  gl_Position = kill > 0.5 ? vec4(2.0, 2.0, 2.0, 1.0) : projectionMatrix * viewMatrix * vec4(wp, 1.0);
-}`,
-    NR = `
-varying vec3 vCol; varying float vA; varying vec2 vUv; varying float vLife;
-void main(){
-  float x = vUv.x * 2.0, y = vUv.y;
-  // little crown: a rim arc that opens outward, plus a few thrown droplets
-  float dome = smoothstep(1.0, 0.25, length(vec2(x * 1.15, y * 1.5)));
-  float crown = dome * (0.35 + 0.65 * smoothstep(0.25, 0.75, length(vec2(x, y * 1.4))));
-  float core = smoothstep(0.5, 0.0, length(vec2(x * 1.6, (y - 0.25) * 1.6))) * (1.0 - vLife);
-  float dots = smoothstep(0.16, 0.05, length(vec2(abs(x) - 0.75, y - 0.82))) + smoothstep(0.14, 0.04, length(vec2(x - 0.2, y - 0.93)));
-  float a = clamp(crown * 0.5 + core * 0.8 + dots * 0.0, 0.0, 1.0) * vA * 0.6;
-  if (a < 0.003) discard;
-  gl_FragColor = vec4(vCol, a);
 }`;
-  function Fb(i, e, t) {
+  function Fb(i, t) {
     let n = new ea();
     (n.setAttribute(
       "position",
@@ -1127,22 +838,19 @@ void main(){
       ),
     ),
       n.setIndex([0, 1, 2, 2, 1, 3]));
-    let s = new Float32Array((i + e) * 4);
-    for (let o = 0; o < (i + e) * 4; o++) s[o] = t();
-    for (let o = i; o < i + e; o++) s[o * 4 + 3] = -1;
+    let s = new Float32Array(i * 4);
+    for (let o = 0; o < i * 4; o++) s[o] = t();
     return (
       n.setAttribute("aSeed", new zs(s, 4)),
-      (n.instanceCount = i + e),
+      (n.instanceCount = i),
       (n.boundingSphere = new Dn(new W(), 1e5)),
       n
     );
   }
-  function Nb(i, e) {
+  function Nb(i) {
     let t = i.rng && i.rng.fork ? i.rng.fork() : Math.random,
       n = Math.max(0.15, i.quality.rain || 0.5),
       s = Math.round(14e3 * n),
-      o = 260,
-      r = Math.round(900 * n),
       a = [0, 1, 2, 3].map(() => new W()),
       l = [0, 1, 2, 3].map(() => new W()),
       c = Mn.color.clone().multiplyScalar(1.9),
@@ -1161,7 +869,6 @@ void main(){
         ...h,
         uSky: { value: f },
         uPix: { value: 0.002 },
-        uDrip: { value: 0 },
         uVel: { value: new W(-1.4, -1.5, 0.7) },
         uBox: { value: new W(26, 15, 26) },
       },
@@ -1175,32 +882,12 @@ void main(){
         side: Sn,
         fog: !1,
       }),
-      v = new Qe(Fb(s, o, t), d);
+      v = new Qe(Fb(s, t), d);
     ((v.frustumCulled = !1),
       (v.renderOrder = 900),
-      (v.name = "rain"),
+      (v.name = "ash"),
       (v.matrixAutoUpdate = !1),
       (v.castShadow = v.receiveShadow = !1));
-    let g = {
-        ...h,
-        uMask: { value: e.mask },
-        uMaskRect: { value: new W(Li.x0, Li.z0, 1 / Li.size) },
-      },
-      x = new zn({
-        uniforms: g,
-        vertexShader: UR,
-        fragmentShader: NR,
-        transparent: !0,
-        depthWrite: !1,
-        blending: hr,
-        side: Sn,
-        fog: !1,
-      }),
-      y = new Qe(Fb(r, 0, t), x);
-    ((y.frustumCulled = !1),
-      (y.renderOrder = 890),
-      (y.name = "rainSplash"),
-      (y.matrixAutoUpdate = !1));
     let b = 0.6,
       m = 0.6,
       A = 22 + t() * 25,
@@ -1208,7 +895,6 @@ void main(){
       M = new Ae();
     return {
       rain: v,
-      splash: y,
       wind: p.uVel.value,
       setRain(w) {
         m = Math.min(1, Math.max(0, w));
@@ -1221,7 +907,7 @@ void main(){
           (b += (m - b) * Math.min(1, w * 0.8)),
           (h.uTime.value = _),
           (h.uRain.value = b),
-          (v.visible = b > 0.01, y.visible = !1));
+          (v.visible = b > 0.01));
         let S = i.camera;
         if (S) {
           let O = i.render && i.render.resolution;
@@ -1237,7 +923,6 @@ void main(){
               l[O].set(q.max.x + 0.15, q.max.y + 0.3, q.max.z + 0.15))
             : (a[O].set(0, 0, 0), l[O].set(0, 0, 0));
         }
-        p.uDrip.value = z.length ? 1 : 0;
         let H = (i.level && i.level.skylights) || [];
         for (let O = 0; O < 8; O++) {
           let q = H[O];
@@ -1282,10 +967,9 @@ void main(){
       d = new wt();
     d.name = "ground";
     let v = Ib(i, p),
-      g = kb(i, p),
-      x = Nb(i, p);
-    (d.add(v.mesh, x.rain, x.splash), i.scene.add(d));
-    let y = zb(i, v.uniforms, [v.mesh, g.mesh, x.rain, x.splash]);
+      x = Nb(i);
+    (d.add(v.mesh, x.rain), i.scene.add(d));
+    let y = zb(i, v.uniforms, [v.mesh, x.rain]);
     i.render && i.render.addPrePass && i.render.addPrePass(y.pass);
     let b = (M, E) => {
         let w = i.level && i.level.interiorBoxes;
@@ -1310,7 +994,6 @@ void main(){
       _ = {
         root: d,
         apron: v.mesh,
-        sea: g.mesh,
         rain: x.rain,
         planar: y,
         reflectionTarget: y.target,
@@ -1352,9 +1035,7 @@ void main(){
         update(M) {
           ((A += M),
             x.update(M),
-            (v.uniforms.uTime.value = A),
-            (v.uniforms.uRain.value = 0),
-            (g.uniforms.uTime.value = A));
+            (v.uniforms.uTime.value = A));
         },
       };
     return _;
