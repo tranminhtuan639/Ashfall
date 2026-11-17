@@ -18,9 +18,14 @@
     const sentries = createArenaSentries(game);
     const difficulty = { easy: { sentryLimit: 8, enemyHealth: .55 },
       medium: { sentryLimit: 6, enemyHealth: .8 }, hard: { sentryLimit: 4, enemyHealth: 1 } };
-    const maxHealth = player.maxHealth || 100;
+    const maxHealth = game.character?.woodenHands ? 115 : 100;
+    player.maxHealth = player.health = maxHealth;
+    const hostRevive = createCoopStageRevive(), guestRevive = createCoopStageRevive();
+    let guestReviveId = 0, guestAppliedRevive = 0, guestReviveSeconds = null;
+    const peerMaxHealth = () => remote.triplet ? 115 : 100;
     const spawnZ = level.playerStart?.pos.z ?? level.arena.B + 7;
-    const follow = new W(), aim = new W();
+    const follow = new W(), aim = new W(), spectatorPivot = new W();
+    let spectatorYaw = null;
     const worldHud = {};
     const campaignHud = Object.create(hud);
     for (const [method, key] of Object.entries({
@@ -40,16 +45,13 @@
       alive: () => player.alive || remote.alive,
       radio: (line, seconds, clip) => send({ type: "radio", line, seconds, clip }),
       stageStarted(stage) {
+        if (stage === stageStarted) return;
+        hostRevive.reset();
+        guestRevive.reset();
         stageStarted = stage;
-        if (stage === 1) return;
+        if (stage === 1 || (!player.alive && !remote.alive)) return;
         if (!player.alive) respawn();
-        if (!remote.alive) {
-          remote.health = maxHealth;
-          remote.alive = true;
-          remote.pos.set(2, 0, level.arena.B - 8);
-          remote.eye.copy(remote.pos).y += 1.6;
-          remote.hurtAt = -Infinity;
-        }
+        if (!remote.alive) respawnGuest();
       },
       readyToExtract() { transportReady = true; },
       ankyloExplosion(pos, scale, customAudio) {
@@ -113,6 +115,32 @@
     avatar.visible = false;
     avatar.add(capsule, indicator);
     game.scene.add(avatar);
+    // RAVEN_COOP_AVATAR
+    const avatars = new Map(), pendingAvatars = new Set();
+    const localTriplet = game.character?.woodenHands === true;
+    const localWeapon = game.character?.weapon ?? ashfallAK47Gold;
+    const peerWeapon = () => remote.triplet ? ashfallAK47Gold
+      : remote.characterKnown ? ashfallM416 : ashfallAK47Gold;
+    let reloadTime = -1, localShotId = 0;
+    function loadAlly(triplet) {
+      if (avatars.has(triplet) || pendingAvatars.has(triplet)) return;
+      pendingAvatars.add(triplet);
+      const create = triplet ? createTripleTCoopAvatar : createRavenCoopAvatar;
+      create().then(model => {
+        if (!triplet) model.root.scale.setScalar(1.312);
+        model.root.visible = false;
+        avatar.add(model.root);
+        avatars.set(triplet, model);
+      }).catch(error => console.warn("[Ashfall co-op] Ally avatar unavailable", error));
+    }
+    game.events.on("weapon:fire", () => {
+      if (connected) localShotId++;
+    });
+    game.events.on("weapon:reload", event => {
+      if (!connected) return;
+      if (event.phase === "start") reloadTime = 0;
+      if (event.phase === "done") reloadTime = -1;
+    });
 
     const session = { state: "title", update, start() {} };
     let role, credentials, generation = 0, outbound = [], connected = false;
@@ -201,6 +229,7 @@
       if (credentials && intent) api("leave", { ...credentials, intent }, true).catch(() => {});
       credentials = null;
       connected = synced = remote.alive = avatar.visible = false;
+      spectatorYaw = null;
       outbound = [];
       session.state = "title";
       player.enabled = false;
@@ -227,13 +256,41 @@
       hostButton.disabled = joinButton.disabled = enter.disabled = false;
       status.textContent = message;
     }
+    const moves = new Set(["Rifle Idle", "Rifle Walk Forward", "Rifle Walk Backward",
+      "Rifle Strafe Left", "Rifle Strafe Right", "Rifle Sprint"]);
+    function avatarPose() {
+      const vx = player.vel?.x || 0, vz = player.vel?.z || 0;
+      const speed = Math.hypot(vx, vz);
+      const ahead = -vx * Math.sin(player.yaw) - vz * Math.cos(player.yaw);
+      const right = vx * Math.cos(player.yaw) - vz * Math.sin(player.yaw);
+      const move = speed < .22 ? "Rifle Idle" : player.sprinting ? "Rifle Sprint"
+        : Math.abs(ahead) >= Math.abs(right) ? (ahead >= 0 ? "Rifle Walk Forward" : "Rifle Walk Backward")
+        : right >= 0 ? "Rifle Strafe Right" : "Rifle Strafe Left";
+      return { move, speed, reload: reloadTime < 0 ? -1 : Math.min(2.5, reloadTime * 2.5 / localWeapon.reloadSeconds) };
+    }
     const pose = () => ({
+      ...avatarPose(),
+      character: localTriplet ? "triple-t" : game.character ? "raven" : null,
+      aim: weapon.ads > .45, shot: localShotId,
+      reviveAck: guestAppliedRevive,
       position: player.pos.toArray(), eye: player.eye.toArray(), yaw: player.yaw, pitch: player.pitch, grounded: player.onGround,
     });
     function startSession() {
+      loadAlly(false);
+      remote.triplet = remote.characterKnown = remote.aim = false;
+      remote.shot = 0;
+      localShotId = 0;
+      reloadTime = -1;
+      remote.move = "Rifle Idle";
+      remote.speed = 0;
+      remote.reload = -1;
       phase = "entry";
       reason = "";
       stageStarted = guestStage = requiredGigas = 0;
+      hostRevive.reset();
+      guestRevive.reset();
+      guestReviveId = guestAppliedRevive = 0;
+      guestReviveSeconds = null;
       displayedEnd = transportReady = remoteExtract = false;
       nextShotBudgetAt = performance.now();
       shotBudget = 3;
@@ -254,7 +311,7 @@
       remote.eye.copy(remote.pos).add(new W(0, 1.6, 0));
       remote.yaw = remote.pitch = 0;
       remote.alive = true;
-      remote.health = maxHealth;
+      remote.health = 100;
       remote.hurtAt = -Infinity;
       avatar.position.copy(remote.pos);
       avatar.visible = true;
@@ -280,9 +337,21 @@
           ![...data.position, ...data.eye, data.yaw, data.pitch].every(Number.isFinite)) return false;
       if (Math.abs(data.position[0]) > level.arena.A + 4 || Math.abs(data.position[2]) > Math.max(level.arena.B + 2, spawnZ + 4) ||
           data.position[1] < -1 || data.position[1] > 4) return false;
+      if (role === "host" && guestReviveId > 0 && data.reviveAck !== guestReviveId) return false;
       remote.pos.fromArray(data.position);
       remote.eye.fromArray(data.eye);
       if (remote.eye.distanceToSquared(remote.pos) > 9) remote.eye.copy(remote.pos).add(new W(0, 1.6, 0));
+      const previousMaxHealth = peerMaxHealth();
+      remote.triplet = data.character === "triple-t";
+      if (role === "host" && remote.alive && peerMaxHealth() !== previousMaxHealth) {
+        remote.health = Math.min(peerMaxHealth(), remote.health + peerMaxHealth() - previousMaxHealth);
+      }
+      remote.characterKnown = remote.triplet || data.character === "raven";
+      remote.aim = data.aim === true;
+      if (Number.isSafeInteger(data.shot) && data.shot >= 0) remote.shot = data.shot;
+      remote.move = moves.has(data.move) ? data.move : "Rifle Idle";
+      remote.speed = Number.isFinite(data.speed) ? Math.min(12, Math.max(0, data.speed)) : 0;
+      remote.reload = Number.isFinite(data.reload) && data.reload >= 0 ? Math.min(data.reload, 2.5) : -1;
       remote.yaw = data.yaw;
       remote.pitch = data.pitch;
       remote.forward.set(-Math.sin(remote.yaw), 0, -Math.cos(remote.yaw));
@@ -322,14 +391,14 @@
             !Array.isArray(packet.direction) || packet.direction.length !== 3 ||
             !packet.direction.every(Number.isFinite)) return;
         const now = performance.now();
-        const interval = 1000 * 60 / O_;
+        const interval = 1000 * 60 / peerWeapon().rpm;
         shotBudget = Math.min(3, shotBudget + (now - nextShotBudgetAt) / interval);
         nextShotBudgetAt = now;
         if (shotBudget < 1) return;
         shotDirection.fromArray(packet.direction);
         if (shotDirection.lengthSq() < .81 || shotDirection.lengthSq() > 1.21) return;
         shotBudget--;
-        takeShot(1, remote.eye, shotDirection.normalize(), { damage: H_, range: V_ });
+        takeShot(1, remote.eye, shotDirection.normalize(), { damage: peerWeapon().damage, range: peerWeapon().range });
         return;
       }
       if (packet.type === "trace" && packet.index === 0 && Array.isArray(packet.from) && Array.isArray(packet.to)) {
@@ -371,16 +440,21 @@
       worldHud.wave = packet.wave;
       worldHud.stage = packet.stage;
       remote.alive = packet.hostAlive;
-      if (packet.stageStarted > guestStage) {
-        guestStage = packet.stageStarted;
-        if (!player.alive) respawn();
+      const reviveId = packet.guestReviveId;
+      guestReviveSeconds = Number.isFinite(packet.guestReviveSeconds) ? packet.guestReviveSeconds : null;
+      if (Number.isSafeInteger(reviveId) && reviveId > guestAppliedRevive) {
+        guestAppliedRevive = reviveId;
+        respawn();
+      } else if (reviveId == null && packet.stageStarted > guestStage && !player.alive && phase !== "defeat") {
+        respawn();
       }
+      guestStage = Math.max(guestStage, packet.stageStarted || 0);
       if (transportReady !== packet.transportReady) {
         transportReady = packet.transportReady;
         transport.setReady(transportReady);
       }
       if (Number.isFinite(packet.guestHealth)) {
-        if (packet.guestHit !== lastGuestHit) {
+        if (packet.guestHit !== lastGuestHit || (packet.guestHealth <= 0 && player.alive)) {
           lastGuestHit = packet.guestHit;
           player.damage(Math.max(0, player.health - packet.guestHealth), remote.pos);
         }
@@ -504,17 +578,30 @@
     node("[data-leave]").onclick = () => leave("", "leave-button");
 
     function respawn() {
+      reloadTime = -1;
       player.reset({ pos: new W(role === "host" ? -2 : 2, 0, level.arena.B - 8), yaw: 0 });
       weapon.reset?.();
     }
+    function respawnGuest() {
+      guestReviveId++;
+      remote.health = peerMaxHealth();
+      remote.alive = true;
+      remote.pos.set(2, 0, level.arena.B - 8);
+      remote.eye.copy(remote.pos).y += 1.6;
+      remote.hurtAt = -Infinity;
+      remote.reload = -1;
+    }
+
     function simulate(dt, now) {
       if (!player.alive && !remote.alive) {
         phase = "defeat";
         reason = "Both players are down";
         return;
       }
+      if (hostRevive.update(player.alive, remote.alive, dt)) respawn();
+      if (guestRevive.update(remote.alive, player.alive, dt)) respawnGuest();
       if (remote.alive && now - remote.hurtAt >= 1000 * (player.tuning?.regenDelay ?? 4)) {
-        remote.health = Math.min(maxHealth, remote.health + (player.tuning?.regenRate ?? 25) * dt);
+        remote.health = Math.min(peerMaxHealth(), remote.health + (player.tuning?.regenRate ?? 25) * dt);
       }
       if (phase === "entry" &&
           [player, remote].some(unit => unit.alive && unit.pos.z < level.arena.B - 1.15)) phase = "active";
@@ -553,6 +640,9 @@
         matchText.textContent = peerActive ? "Reconnecting to the LAN relay…" : "Waiting for teammate to reconnect…";
         return false;
       }
+      if (reloadTime >= 0) {
+        reloadTime = player.alive && weapon.state === "reloading" ? reloadTime + dt : -1;
+      }
       const now = performance.now();
       const running = phase === "active" || phase === "entry";
       if (role === "host") {
@@ -574,7 +664,8 @@
       if (now >= nextSend) {
         nextSend = now + 55;
         send(role === "host" ? { type: "world", hostPose: pose(), hostAlive: player.alive,
-          guestHealth: remote.health, guestHit: remote.hit, phase, reason, hud: worldHud,
+          guestHealth: remote.health, guestHit: remote.hit, guestReviveId,
+          guestReviveSeconds: guestRevive.seconds(), phase, reason, hud: worldHud,
           stage: campaign.stage, wave: campaign.wave, stageStarted, transportReady,
           raptors: raptors.map(unit => unit.lanSnapshot()), sentries: sentries.lanSnapshot(),
           ankylos: game.enemies.lanSnapshot(), gigas: game.gigas.map(unit => unit.lanSnapshot()),
@@ -582,7 +673,15 @@
           beams: [...beamFrames], flames: flameFrames }
           : { type: "pose", pose: pose() });
       }
-      avatar.visible = remote.alive;
+      const triplet = remote.triplet === true;
+      loadAlly(triplet);
+      const ally = avatars.get(triplet);
+      for (const model of avatars.values()) model.root.visible = model === ally;
+      capsule.visible = indicator.visible = !ally;
+      avatar.visible = remote.alive || Boolean(ally);
+      ally?.update(dt, { ...remote, dead: !remote.alive });
+      if (remote.reload >= 0)
+        remote.reload = Math.min(2.5, remote.reload + dt * 2.5 / peerWeapon().reloadSeconds);
       avatar.position.lerp(remote.pos, Math.min(1, dt * 19));
       indicator.rotation.set(remote.pitch, remote.yaw, 0, "YXZ");
       const ended = phase === "victory" || phase === "defeat";
@@ -599,14 +698,25 @@
         : phase === "defeat" ? (reason || "Mission failed")
         : transportReady ? "Board the transport · [2] Extract"
         : `Stage ${role === "host" ? campaign.stage : worldHud.stage} · Wave ${role === "host" ? campaign.wave : worldHud.wave}`;
-      const text = `${role === "host" ? "HOST" : "GUEST"} · ${label}${observing ? " · Spectating teammate" : ""}`;
+      const seconds = role === "host" ? hostRevive.seconds() : guestReviveSeconds;
+      const spectating = !observing ? "" : seconds === null ? " · Chờ sang màn để hồi sinh"
+        : ` · Hồi sinh sau ${seconds}s`;
+      const text = `${role === "host" ? "HOST" : "GUEST"} · ${label}${spectating}`;
       if (matchText.textContent !== text) matchText.textContent = text;
       weapon.setVisible?.(!observing && !ended);
       if (observing) {
-        aim.set(-Math.sin(remote.yaw), 0, -Math.cos(remote.yaw));
-        follow.copy(remote.eye).addScaledVector(aim, -2.3).y += .85;
+        if (spectatorYaw === null) spectatorYaw = remote.yaw;
+        const turn = remote.yaw - spectatorYaw;
+        spectatorYaw += Math.atan2(Math.sin(turn), Math.cos(turn)) * (1 - Math.exp(-12 * dt));
+        // Follow the rendered teammate, whose position is interpolated every frame.
+        // Use a fixed height above their feet so their first-person bob stays local.
+        spectatorPivot.copy(avatar.position).y += 1.6;
+        aim.set(-Math.sin(spectatorYaw), 0, -Math.cos(spectatorYaw));
+        follow.copy(spectatorPivot).addScaledVector(aim, -2.3).y += .85;
         game.camera.position.copy(follow);
-        game.camera.lookAt(aim.multiplyScalar(3).add(remote.eye));
+        game.camera.lookAt(spectatorPivot.addScaledVector(aim, 3));
+      } else {
+        spectatorYaw = null;
       }
       if (ended || observing) {
         player.enabled = false;

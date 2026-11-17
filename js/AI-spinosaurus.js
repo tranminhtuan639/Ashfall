@@ -78,7 +78,7 @@
     let attack, queuedAttack, attackCount, openingAttacks, lastBeam;
     function restartAttackSequence() {
       attackCount = 0;
-      openingAttacks = ["newBeam", "newFire"];
+      openingAttacks = ["newBeam", "oldFire", "newFire"];
       queuedAttack = null;
       lastBeam = null;
     }

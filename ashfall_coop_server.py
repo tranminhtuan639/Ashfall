@@ -99,6 +99,23 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
+        # RAVEN_COOP_AVATAR
+        asset_path = urlsplit(self.path).path
+        if asset_path in ("/assets/raven-coop.glb", "/assets/m416-red-dot.glb", "/assets/triple-t-coop.glb"):
+            asset = Path(__file__).resolve().parent / "assets" / Path(asset_path).name
+            try:
+                with asset.open("rb") as content:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "model/gltf-binary")
+                    self.send_header("Content-Length", str(asset.stat().st_size))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    copyfileobj(content, self.wfile)
+            except FileNotFoundError:
+                self.send_error(404)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         path = urlsplit(self.path).path
         if path == "/healthz":
             ready = PAGE.is_file()

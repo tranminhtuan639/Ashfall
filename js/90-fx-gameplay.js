@@ -2723,6 +2723,10 @@ void main() {
       }
     }
     function G(ee, B, P = {}) {
+      if (P.coreColor != null) {
+        const core = Yc(P.coreColor, 1, 1, 1);
+        u.add(ee, B, core[0] * 24, core[1] * 24, core[2] * 24, P.speed || 260, (P.width || 0.024) * .38);
+      }
       let V = Yc(P.color, 1, 0.8, 0.46),
         Y = P.intensity || 16;
       if (
@@ -5793,6 +5797,7 @@ void main() {
     Xn = 32e3,
     pl = 22050,
     Go = {
+      ...m416IceAudioDefinitions(),
       ankylo_spawn: { gen: mechaSample("ankylo_spawn"), n: 1, sr: 24000, peak: .9, bus: "world", max: 3, pri: 8, ref: 21, boot: true },
       ankylo_small_spawn: { gen: mechaSample("ankylo_small_spawn"), n: 1, sr: 24000, peak: .8, bus: "world", max: 4, pri: 6, ref: 12, boot: true },
       ankylo_death: { gen: mechaSample("ankylo_death"), n: 1, sr: 24000, peak: .94, bus: "world", max: 3, pri: 9, ref: 21, boot: true },
@@ -6623,12 +6628,17 @@ void main() {
         : ye || (Ue && Ue.pri <= pe.pri ? Ue : null);
     }
     function ze(te, he) {
+      if (i.character?.woodenHands &&
+          (te === "jump" || te === "hurt" || te.startsWith("step_"))) return false;
       ((he = he || {}),
         (te = i_[te] || te),
         he.surface &&
           (te === "impact_concrete"
             ? (te = l_[he.surface] || te)
             : te === "step_concrete" && (te = Iv[he.surface] || te)));
+      // Triple-T plays its own synthesized player sounds.
+      if (i.character?.woodenHands &&
+          ["player_jump_grunt", "player_pain_grunt"].includes(te)) return false;
       let pe = Go[te];
       if (!pe || pe.loop || pe.ir || !o()) return !1;
       let ge = he.variant;
@@ -6883,12 +6893,27 @@ void main() {
       }
     }
     let Hn = (te) => (te && typeof te.x == "number" ? te : null);
+    const usesIceRifle = () => i.character?.weapon?.audioProfile === "m416-ice";
+    let iceShotVariant = 0, iceDryVariant = 0;
     function fo(te) {
+      if (usesIceRifle()) {
+        ze(P >= .5 ? "ice_tail_in" : "ice_tail_out", { gain: te * .58 });
+        R = e.currentTime;
+        return;
+      }
       let he = P;
       (he < 0.95 && ze("rifle_tail_out", { gain: te * (1 - he), jitter: 0.03 }),
         he > 0.05 && ze("rifle_tail_in", { gain: te * he, jitter: 0.03 }),
         (R = e.currentTime));
     }
+    const tripleTSounds = i.character?.woodenHands
+      ? createTripleTSounds(e, H.dry, o) : null;
+    if (tripleTSounds) {
+      n.on("player:step", event => tripleTSounds.step(event?.sprint));
+      n.on("player:jump", () => tripleTSounds.jump());
+      n.on("player:hit", event => tripleTSounds.hurt(+event?.amount || 10));
+    }
+    if (tripleTSounds) i.tripleTAudio = tripleTSounds;
     let ln = (te, he) => {
       n &&
         n.on &&
@@ -6902,20 +6927,31 @@ void main() {
     };
     let lastPainGrunt = -Infinity, breathName = null, breathLoop = null;
     function setPlayerBreath(name) {
+      if (i.character?.woodenHands && name === "player_sprint_breath") name = null;
       if (breathName === name) return;
       breathLoop?.stop(.16);
       breathName = name;
       breathLoop = name ? Be(name, { bus: "dry", gain: .58, fade: 8, offset: 0 }) : null;
     }
     (ln("weapon:fire", () => {
-      ze("rifle_shot", { variant: Math.floor(s() * 3), gain: 1, jitter: .012 });
+      if (usesIceRifle()) ze("ice_shot", {
+        variant: iceShotVariant++ % m416IceAudioData.ice_shot.length, jitter: .012,
+      });
+      else       ze("rifle_shot", { variant: Math.floor(s() * 3), gain: 1, jitter: .012 });
       let te = e.currentTime;
       ((le = te),
-        te - R > 0.28 && fo(1),
+        !usesIceRifle() && te - R > 0.28 && fo(1),
         Y > 0.3 && (Y = Math.min(1, Y + 0.015)));
     }),
-      ln("weapon:dry", () => ze("rifle_dry", { gain: 0.9 })),
+      ln("weapon:dry", () => usesIceRifle()
+        ? ze("ice_dry", { gain: .9, variant: iceDryVariant++ % m416IceAudioData.ice_dry.length })
+        : ze("rifle_dry", { gain: 0.9 })),
       ln("weapon:reload", (te) => {
+        if (usesIceRifle()) {
+          const sound = { magout: "ice_magout", magin: "ice_magin", bolt: "ice_bolt" }[te.phase];
+          if (sound) ze(sound);
+          return;
+        }
         te.phase === "magout"
           ? ze("reload_magout")
           : te.phase === "magin"
@@ -7576,8 +7612,8 @@ void main() {
       KeyA: "left",
       KeyD: "right",
       Space: "jump",
-      ShiftLeft: "sprint",
-      ShiftRight: "sprint",
+      ShiftLeft: "sprintToggle",
+      ShiftRight: "sprintToggle",
       KeyC: "crouch",
       ControlLeft: "crouch",
       ControlRight: "crouch",
@@ -7610,6 +7646,7 @@ void main() {
     If = 58,
     g_ = { pause: 1 };
   function v_(i) {
+    let keyboardSprint = false;
     let e =
         (i.renderer && i.renderer.domElement) ||
         document.getElementById("view"),
@@ -7701,6 +7738,7 @@ void main() {
       }
     }
     function v() {
+      keyboardSprint = false;
       for (let P in o) o[P].clear();
       (n.clear(),
         (u = 0),
@@ -7725,7 +7763,9 @@ void main() {
             P.code.startsWith("Arrow") ||
             P.code === "ControlLeft") &&
           P.preventDefault(),
-        !P.repeat && d("key", V, !0));
+        !P.repeat && (V === "sprintToggle"
+          ? (r && (keyboardSprint = !keyboardSprint))
+          : d("key", V, !0)));
     }),
       addEventListener("keyup", (P) => {
         d("key", h_[P.code], !1);
@@ -8037,7 +8077,7 @@ void main() {
       if (r) {
         ((V = (n.has("right") ? 1 : 0) - (n.has("left") ? 1 : 0)),
           (Y = (n.has("forward") ? 1 : 0) - (n.has("back") ? 1 : 0)),
-          (L = n.has("sprint")),
+          (L = keyboardSprint || n.has("sprint")),
           w >= 0 &&
             ((V += H),
             (Y += O),
@@ -8064,8 +8104,8 @@ void main() {
     return f;
   }
   var Mt = {
-      walk: 3.8,
-      sprint: 6.4,
+      walk: 4.4,
+      sprint: 7.7,
       crouch: 1.9,
       ads: 2.4,
       accelGround: 34,
@@ -8331,8 +8371,9 @@ void main() {
       C.sprinting =
         (B && C.onGround && C.speed > Mt.walk * 0.6) ||
         (B && !C.onGround && C.sprinting);
+      const sprintSpeed = i.character?.sprintSpeed ?? Mt.sprint;
       let P = Mt.walk;
-      (C.crouching ? (P = Mt.crouch) : B && (P = Mt.sprint),
+      (C.crouching ? (P = Mt.crouch) : B && (P = sprintSpeed),
         (P = bi(P, Math.min(P, Mt.ads), C.ads)),
         me < 0 && (P *= bi(1, 0.82, -me)));
       let V = Math.sin(C.yaw),
@@ -8431,7 +8472,7 @@ void main() {
         (d = -Math.cos(h * Math.PI * 2) * Mt.bobY * f),
         (p = Math.sin(h * Math.PI) * Mt.bobX * f));
       let k = C.vel.x * Y - C.vel.z * V;
-      ((v = kn(v, (-k / Mt.sprint) * Mt.rollStrafe * bi(1, 0.4, C.ads), 8, F)),
+      ((v = kn(v, (-k / sprintSpeed) * Mt.rollStrafe * bi(1, 0.4, C.ads), 8, F)),
         (E += F),
         (C.regenerating = F > 0 && E > Mt.regenDelay && C.health < C.maxHealth),
         C.regenerating && (C.health = Math.min(C.maxHealth, C.health + Mt.regenRate * F)),

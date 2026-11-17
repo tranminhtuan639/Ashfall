@@ -1845,7 +1845,10 @@
   function Vv(i) {
     let e = [],
       t = i.debugParts || null,
-      n = (d, v) => (e.push(v), t && t.push([d, v]), v);
+      n = (d, v) => {
+        if (i.wooden && ["guard", "bar", "seam", "heelPad"].includes(d)) return v;
+        return (e.push(v), t && t.push([d, v]), v);
+      };
     n("palm", EC());
     {
       let d = [];
@@ -2111,7 +2114,7 @@
     let p = {
       fabric: Ii(e),
       thumbTip: thumb.skin,
-      forearm: i.bareArm ? bareForearm(i.forearm) : null,
+      forearm: i.bareArm ? bareForearm(i.forearm, i.wooden) : null,
       rubber: null,
       index: s.length ? s : null,
       knuckle: om[0].base.slice(),
@@ -2568,16 +2571,10 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
   }
   var gi = W,
     fm = Lt,
-    Gv = 44,
-    B_ = 352,
-    O_ = 660,
-    H_ = 44,
-    V_ = 300,
     eu = { p: [0.118, -0.122, -0.275], r: [0.034, 0.085, -0.03] },
     qv = { p: [0, -mi.sightY, -0.135], r: [0, 0, 0] },
     tu = { p: [-0.035, 0.004, 0.03], r: [-0.04, 0.62, 0.26] },
     nu = { p: [-0.03, 0.1, -0.02], r: [0.46, 0.22, -0.8] },
-    W_ = 2.1,
     Yo = (i) => ((i = Fo(i)), i * i * i * (i * (6 * i - 15) + 10)),
     pa = (i, e) => ({ x: 0, v: 0, k: i, c: e });
   function ma(i, e, t) {
@@ -2631,7 +2628,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
     return { geometry, material };
   }
 
-  function bareForearm(direction) {
+  function bareForearm(direction, wooden) {
+    const thickness = wooden ? 1.28 : 1;
     const axis=new ti(...direction).normalize();
     const rotation=new vl().setFromUnitVectors(new ti(0,0,1),axis);
     const wrist=new ti(0,0,.028);
@@ -2641,7 +2639,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       [.092,.030,.020],[.138,.034,.023],[.187,.037,.026],[.229,.036,.025],[.273,.033,.024],[.350,.032,.026]]){
       for(let index=0;index<24;index++){
         const angle=index/24*Math.PI*2;
-        pos.set(Math.cos(angle)*rx,Math.sin(angle)*ry+.002*Math.sin(length*10),length)
+        pos.set(Math.cos(angle)*rx*thickness,Math.sin(angle)*ry*thickness+.002*Math.sin(length*10),length)
           .applyQuaternion(rotation).add(wrist);
         rings.v(pos,[1,1,1]);
       }
@@ -2652,6 +2650,11 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
   const akGoldForegrip = /*@inline:data/akGold-foregrip.json*/ null;
 
   async function dm(i) {
+    const loadout = i.character?.weapon ?? ashfallAK47Gold;
+    const woodenHands = i.character?.woodenHands === true;
+    const cameraKick = i.character ? loadout.cameraKick : { hip: 1, ads: .11 };
+    const gunKick = i.character ? loadout.gunKick : cameraKick;
+    const cameraShake = i.character ? loadout.cameraShake : { hip: 1, ads: .35 };
     let e = new wt();
     e.name = "viewmodel-ak-gold";
     const [body, magazine, optic, foregrip] = await Promise.all([
@@ -2727,6 +2730,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       },
       b = i0(-0.24, 0, 0).multiply(i0(0, 0, -Math.PI / 2)),
       m = Vv({
+        wooden: woodenHands,
         mirror: !1,
         fingers: [
           null,
@@ -2747,25 +2751,27 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         bareArm: true,
       }),
       A = new wt();
+    const handScale = woodenHands ? new gi(.96,.96,.93) : new gi(.87,.89,.93);
     (A.quaternion.copy(b),
       A.position
         .fromArray(mi.grip)
-        .sub(new gi(0.006, -0.031, -0.085).applyQuaternion(b)));
-    const glove = s("glove_fabric");
+        .sub(new gi(0.006, -0.031, -0.085).multiply(
+          woodenHands ? handScale : new gi(1, 1, 1)).applyQuaternion(b)));
+    const glove = woodenHands ? null : s("glove_fabric");
     const skin = new Qt({color:0xc78d71,roughness:.64,metalness:0});
-    const handScale = new gi(.87,.89,.93);
-    function dressHand(group, hand, name) {
+    const woodenPalm /* Triple-T */ = woodenHands ? createSahurWoodMaterial() : null;
+    function dressHand(group, hand, name, grainDirection) {
       group.name = name;
       group.scale.copy(handScale);
-      const fabric = o(hand.fabric, glove);
-      const thumbTip = o(hand.thumbTip, skin);
-      const forearm = o(hand.forearm, skin);
+      const fabric = o(hand.fabric, woodenPalm ?? glove);
+      const thumbTip = o(hand.thumbTip, woodenPalm ?? skin);
+      const forearm = o(hand.forearm, woodenHands ? createSahurWoodMaterial(grainDirection) : skin);
       thumbTip.name = "exposed-thumb-tip";
       forearm.name = "bare-forearm";
       group.add(fabric, thumbTip, forearm);
     }
-    dressHand(A, m, "right-hand");
-    let M = o(m.index[0].clone(), glove);
+    dressHand(A, m, "right-hand", y(b, [0.27, -0.44, 0.86]));
+    let M = o(m.index[0].clone(), woodenPalm ?? glove);
     (A.add(M), e.add(A));
     let E = m.index[0].attributes,
       w = m.index[1].attributes,
@@ -2786,6 +2792,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
     }
     let H = i0(0, 0, Math.PI / 2).multiply(i0(0.06, 0, 0)),
       O = Vv({
+        wooden: woodenHands,
         mirror: !0,
         fingers: [
           [1.27, 1.42, 0.75, 0.02],
@@ -2802,7 +2809,9 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         bareArm: true,
       }),
       q = new wt();
-    dressHand(q, O, "left-hand");
+    const leftGrain = y(H, [-0.5, -0.35, 0.79], true);
+    leftGrain[0] *= -1; // The left-hand mesh is mirrored after generation.
+    dressHand(q, O, "left-hand", leftGrain);
     e.add(q);
     let U = new gi(0, -0.015, -0.055),
       T = (Me, we, be = U) => ({
@@ -2915,16 +2924,16 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       },
       ce = { freeze: !1, reloadT: null, empty: !1, flash: !1, noFire: !1 },
       ve = {
-        name: mi.name,
-        ammo: Gv,
-        magSize: Gv,
-        reserve: B_,
-        reserveCapacity: B_,
+        name: i.character ? loadout.name : mi.name,
+        ammo: loadout.magazine,
+        magSize: loadout.magazine,
+        reserve: loadout.reserve,
+        reserveCapacity: loadout.reserve,
         state: "idle",
         ads: 0,
         spread: 0.0125,
-        damage: H_,
-        rpm: O_,
+        damage: loadout.damage,
+        rpm: loadout.rpm,
         root: e,
         debug: ce,
         info: { tris: Math.round(I), meshes: se },
@@ -2959,8 +2968,8 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         },
       };
     function _e() {
-      ((ve.ammo = Gv),
-        (ve.reserve = B_),
+      ((ve.ammo = loadout.magazine),
+        (ve.reserve = loadout.reserve),
         (ve.state = "idle"),
         (ve.ads = 0),
         Object.assign(k, {
@@ -3005,13 +3014,13 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       );
     }
     function Re(Me = new gi()) {
-      return Pe(mi.muzzle, Me);
+      return ve.ravenMuzzleWorld?.(Me) || Pe(mi.muzzle, Me);
     }
     function Fe() {
       if (k.reload || ve.ammo >= ve.magSize || ve.reserve <= 0) return !1;
       let Me = ve.ammo <= 0;
       return (
-        (k.reload = { t: 0, T: W_, empty: Me, f: {} }),
+        (k.reload = { t: 0, T: loadout.reloadSeconds, empty: Me, f: {} }),
         (k.autoReload = -1),
         i.events.emit("weapon:reload", { phase: "start", empty: Me }),
         !0
@@ -3049,13 +3058,14 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         Ie.copy(Me.eye || we.position));
       let ut = null;
       try {
-        ut = i.combat.playerShot(Ie, ze, { damage: H_, range: V_ });
+        ut = i.combat.playerShot(Ie, ze, { damage: loadout.damage, range: loadout.range });
       } catch {}
-      (ut && ut.point ? Ne.copy(ut.point) : Ne.copy(Ie).addScaledVector(ze, V_),
+      (ut && ut.point ? Ne.copy(ut.point) : Ne.copy(Ie).addScaledVector(ze, loadout.range),
         Re(We));
+      const shotColors = ve.ravenIceEffects?.() ? ashfallM416.shotColors : null;
       let nn = i.fx;
       (nn &&
-        (nn.tracer && nn.tracer(We, Ne),
+        (nn.tracer && nn.tracer(We, Ne, shotColors ? { color: shotColors.tracer, coreColor: shotColors.core, trail: false } : undefined),
         nn.shell &&
           (Pe(mi.eject, dt),
           xe
@@ -3065,14 +3075,16 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
           nn.shell(dt, xe))),
         i.render &&
           i.render.lightPool &&
-          i.render.lightPool.flash(We, 16756832, 45, 9, 0.05),
+          i.render.lightPool.flash(We, shotColors?.light ?? 16756832, 45, 9, 0.05),
         i.events.emit("weapon:fire", {
           origin: Ie,
           dir: ze,
           muzzle: We,
           ads: k.adsE,
         }));
-      let bt = bi(1, 0.55, k.adsE) * (Me.crouching ? 0.85 : 1),
+      const stance = Me.crouching ? .85 : 1;
+      const viewKick = bi(gunKick.hip, gunKick.ads, k.adsE) * stance;
+      let bt = bi(cameraKick.hip, cameraKick.ads, k.adsE) * stance,
         Os = k.burst,
         pn = bi(.72, 1.65, Fo((Os - 1) / 10)),
         Ti =
@@ -3081,11 +3093,11 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
             : Math.sin(Os * 0.57 + k.recPhase) * bi(.0036, .0072, Fo((Os - 3) / 10)) +
               (ae() - 0.5) * 0.002) * bt;
       (Me.addRecoil && Me.addRecoil(0.0068 * pn * bt * (0.85 + ae() * 0.3), Ti),
-        Me.addShake && Me.addShake(0.12 * bt),
-        (k.kZ.v += 1.5 * bi(1, 0.6, k.adsE)),
-        (k.kP.v += 1.5 * bt),
-        (k.kY.v += (ae() - 0.5) * 1 * bt),
-        (k.kR.v += (ae() - 0.5) * 1.8 * bt),
+        Me.addShake && Me.addShake(0.12 * bt * bi(cameraShake.hip, cameraShake.ads, k.adsE)),
+        (k.kZ.v += 1.5 * loadout.backwardKickScale * bi(1, 0.6, k.adsE)),
+        (k.kP.v += 1.5 * viewKick),
+        (k.kY.v += (ae() - 0.5) * 1 * viewKick),
+        (k.kR.v += (ae() - 0.5) * 1.8 * viewKick),
         (k.bloom = Math.min(1, k.bloom + .09 + .012 * Math.min(Os, 9))),
         (k.flashT = k.flashDur = 0.036 + ae() * 0.02));
       let ho = x.material.uniforms;
@@ -3114,7 +3126,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       if (
         (ce.reloadT != null &&
           !k.reload &&
-          (k.reload = { t: 0, T: W_, empty: ce.empty, f: {} }),
+          (k.reload = { t: 0, T: loadout.reloadSeconds, empty: ce.empty, f: {} }),
         k.reload)
       ) {
         let Je = k.reload;
@@ -3136,6 +3148,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
           ve.ammo += Tt;
           ve.reserve -= Tt;
         }
+        if (loadout.audioProfile === "m416-ice") Vt("bolt", 1.62);
         (Pt >= 1.5 && !Je.f.tap && ((Je.f.tap = 1), (k.bump.v += 0.4)),
           le($, Pt),
           q.position.copy(Y),
@@ -3163,7 +3176,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         if (ve.ammo > 0) {
           let Je = 0;
           for (; k.cooldown <= 0 && ve.ammo > 0 && Je < 3; )
-            (Be(), (k.cooldown += 60 / O_), Je++);
+            (Be(), (k.cooldown += 60 / loadout.rpm), Je++);
         } else
           k.dryDone ||
             ((k.dryDone = !0),
@@ -3349,7 +3362,11 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
           Math.sin(he * 0.5) * 0.004 * te;
       (e.position.set(it, gt, Ot), e.rotation.set(xn, $t, Ht, "YXZ"));
     }
-    return (_e(), ve);
+    _e();
+    // RAVEN_FIRST_PERSON
+    if (!i.character || loadout.viewmodel === "raven")
+      installRavenViewmodel(i, ve, () => k.reload, eu.p, qv.p, eu.r);
+    return ve;
   }
   async function PC(i) {
     let e = await dm(i);

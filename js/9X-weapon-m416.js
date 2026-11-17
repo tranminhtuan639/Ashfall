@@ -1,0 +1,16 @@
+  const ashfallM416 = Object.freeze({
+    name: "m416 - ice",
+    audioProfile: "m416-ice",
+    viewmodel: "raven",
+    magazine: 60,
+    reserve: 420,
+    rpm: 990,
+    damage: 25,
+    range: 160,
+    shotColors: Object.freeze({ tracer: 0x00f0ff, core: 0xc9faff, light: 0x7df9ff }),
+    reloadSeconds: 2.1,
+    cameraKick: { hip: .52, ads: .11 },
+    gunKick: { hip: .8, ads: .11 },
+    cameraShake: { hip: .35, ads: .35 },
+    backwardKickScale: .7,
+  });

@@ -28,20 +28,20 @@
       [
         [...ring.map(side => ankylo(side, 4, 1230, 2, 345)), ...pack(flanks, 2, true)],
         [ankylo("west", 6, 1500, 2, 500), ankylo("east", 6, 1500, 2, 500),
-          ankylo("south", 8, 2000, 3, 550, true), ...pack(flanks, 2, true)],
+          ankylo("south", 8, 5500, 3, 550, true), ...pack(flanks, 2, true)],
       ],
       [
         [giga("west"), giga("east"), ankylo("south", 4, 1230, 2, 345), ankylo("south", 4, 1230, 2, 345)],
-        [giga("north", 30000, "purple", true), giga("south", 30000, "yellow", true)],
+        [giga("north", 33000, "purple", true), giga("south", 33000, "yellow", true)],
       ],
       [
         [
-          giga("south"), giga("south", 20000, "purple"), giga("south", 20000, "yellow"),
+          giga("south"), giga("south", 22000, "purple"), giga("south", 22000, "yellow"),
           ankylo("north", 4, 1230, 2, 345), ankylo("north", 8, 2000, 3, 550),
           raptor("north", 180, 1, true), raptor("north", 180, 1, true), raptor("north", 3600, 3, true),
-          giga("west", 20000, "purple", true), giga("east", 20000, "yellow", true),
+          giga("west", 30000, "purple", true), giga("east", 30000, "yellow", true),
         ],
-        [{ kind: "spino", side: "east", hp: 50000 }],
+        [{ kind: "spino", side: "east", hp: 66000 }],
       ],
     ];
     const lines = {

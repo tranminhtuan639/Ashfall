@@ -40,7 +40,9 @@
     let i = Object.fromEntries(new URLSearchParams(location.search)),
       e = !!i.bench || location.hash === "#bench";
     e && ((i.noaudio = "1"), (i.autostart = "1"));
+    const character = await chooseAshfallCharacter(i, e, vM);
     let t = {
+      character,
       THREE: lt,
       params: i,
       events: Dy(),

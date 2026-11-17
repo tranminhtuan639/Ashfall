@@ -1,0 +1,15 @@
+  const ashfallAK47Gold = Object.freeze({
+    name: "AK-47 Gold",
+    viewmodel: "ak-gold",
+    magazine: 44,
+    reserve: 352,
+    rpm: 690,
+    damage: 44,
+    range: 300,
+    shotColors: null,
+    reloadSeconds: 2.1,
+    cameraKick: { hip: 1, ads: .55 },
+    gunKick: { hip: 1, ads: .55 },
+    cameraShake: { hip: 1, ads: 1 },
+    backwardKickScale: 1,
+  });

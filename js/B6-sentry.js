@@ -9,7 +9,7 @@
     const damage = 7;
     const interval = .2;
     const secondShotDelay = .055;
-    const scale = 1.15 * 1.2 * 1.36;
+    const scale = 1.15 * 1.2 * 1.0;
     const clearance = 1.08 * 1.2;
     const gunModel = game.sentryGun;
     const position = new W(), forward = new W();
