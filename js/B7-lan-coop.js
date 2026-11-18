@@ -1,4 +1,4 @@
-  // The browser host simulates all four campaign stages. The HTTP process only relays packets.
+// The browser host simulates all four campaign stages. The HTTP process only relays packets.
   function setupArenaLan(game) {
     const { player, input, weapon, hud, level, defense } = game;
     const { raptors, transport } = defense;
@@ -143,7 +143,7 @@
     });
 
     const session = { state: "title", update, start() {} };
-    let role, credentials, generation = 0, outbound = [], connected = false;
+    let role, credentials, generation = 0, outbound = [], snapshotOut = null, connected = false, lanPing = 0;
     let lastPoll = 0, retrySince = null, peerActive = true;
     let synced = false, nextSend = 0, nextShotBudgetAt = 0, shotBudget = 3;
     let reason = "", nextDeploy = 0, lastGuestHit = 0, displayedEnd = false;
@@ -235,11 +235,16 @@
     }
     function send(packet) {
       if (!connected) return;
+      const raw = JSON.stringify(packet, (_, value) =>
+        typeof value === "number" && !Number.isInteger(value) ? Number(value.toFixed(4)) : value);
+      // world/pose: chỉ giữ bản mới nhất và luôn gửi ĐẦU TIÊN, không xếp sau đống cue.
       if (packet.type === "world" || packet.type === "pose") {
-        outbound = outbound.filter(raw => JSON.parse(raw).type !== packet.type);
+        snapshotOut = raw;
+        return;
       }
-      if (outbound.length < 64) outbound.push(JSON.stringify(packet, (_, value) =>
-        typeof value === "number" && !Number.isInteger(value) ? Number(value.toFixed(4)) : value));
+      // tiếng bước chân/thở... mất vài gói không sao, đừng để nó làm nghẽn hàng đợi.
+      if (packet.type === "cue" && /step|breath|motion/.test(packet.event) && outbound.length > 20) return;
+      if (outbound.length < 64) outbound.push(raw);
     }
     function leave(message = "", intent = null) {
       generation++;
@@ -250,6 +255,7 @@
       connected = synced = remote.alive = avatar.visible = false;
       spectatorYaw = null;
       outbound = [];
+      snapshotOut = null;
       session.state = "title";
       player.enabled = false;
       input.setGameplay?.(false);
@@ -524,7 +530,11 @@
       if (epoch !== generation || !credentials) return;
       let data;
       try {
-        data = await api("poll", { ...credentials, packets: outbound.splice(0, 32) });
+        const packets = outbound.splice(0, snapshotOut ? 31 : 32);
+        if (snapshotOut) { packets.unshift(snapshotOut); snapshotOut = null; }
+        const sentAt = performance.now();
+        data = await api("poll", { ...credentials, packets });
+        lanPing = Math.round(performance.now() - sentAt);
         if (!Array.isArray(data.packets)) throw new Error("Invalid LAN response");
       } catch (error) {
         if (epoch !== generation) return;
@@ -534,6 +544,7 @@
         }
         retrySince ??= performance.now();
         outbound = [];
+        snapshotOut = null;
         if (performance.now() - retrySince >= 120000) {
           leave("Mất kết nối tới relay quá lâu. Kiểm tra máy Host rồi tạo phòng mới.");
           return;
@@ -557,7 +568,7 @@
         leave("Lỗi đồng bộ LAN. Xem Console ở trình duyệt này để biết chi tiết.");
         return;
       }
-      setTimeout(() => poll(epoch), connected ? 30 : 230);
+      setTimeout(() => poll(epoch), connected ? 0 : 230);
     }
     async function joinRoom(mode) {
       const code = codeInput.value.trim();
@@ -720,7 +731,7 @@
       const seconds = role === "host" ? hostRevive.seconds() : guestReviveSeconds;
       const spectating = !observing ? "" : seconds === null ? " · Chờ sang màn để hồi sinh"
         : ` · Hồi sinh sau ${seconds}s`;
-      const text = `${role === "host" ? "HOST" : "GUEST"} · ${label}${spectating}`;
+      const text = `${role === "host" ? "HOST" : "GUEST"} · ${label}${spectating} · ${lanPing}ms`;
       if (matchText.textContent !== text) matchText.textContent = text;
       weapon.setVisible?.(!observing && !ended);
       if (observing) {

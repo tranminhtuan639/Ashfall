@@ -7,12 +7,14 @@ from pathlib import Path
 import secrets
 from shutil import copyfileobj
 from urllib.parse import urlsplit
-from threading import Lock
+from threading import Condition, Lock
 import time
 
 PAGE = Path(__file__).resolve().parent / "dist" / "index.html"
 ROOMS = {}
 LOCK = Lock()
+WAKE = Condition(LOCK)  # đánh thức poll đang chờ khi peer vừa gửi gói
+POLL_HOLD = 0.04       # giữ poll rỗng tối đa 40ms thay vì trả rỗng ngay
 TIMEOUT = 120
 PEER_STALE_AFTER = 3
 
@@ -97,6 +99,18 @@ def exchange(route, body, client_ip="-"):
             if peer_active:
                 other["inbox"] = newest_snapshots(other["inbox"] + packets)
             del other["inbox"][:-96]
+            if packets:
+                WAKE.notify_all()
+        if route == "/lan/poll" and connected:
+            deadline = time.monotonic() + POLL_HOLD
+            while not player["inbox"] and ROOMS.get(code) is room:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                WAKE.wait(remaining)
+            if ROOMS.get(code) is not room:
+                return 410, {"error": "Phiên LAN đã kết thúc. Hãy kiểm tra relay rồi tạo phòng mới."}
+            player["last"] = time.monotonic()
         inbox, player["inbox"] = newest_snapshots(player["inbox"]), []
         return 200, {"connected": connected, "peerActive": peer_active, "packets": inbox}
 
