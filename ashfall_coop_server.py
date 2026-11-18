@@ -17,6 +17,25 @@ TIMEOUT = 120
 PEER_STALE_AFTER = 3
 
 
+
+def newest_snapshots(packets):
+    latest = {}
+    decoded = []
+    for index, raw in enumerate(packets):
+        try:
+            packet = json.loads(raw)
+            kind = packet.get("type") if isinstance(packet, dict) else None
+        except (ValueError, TypeError):
+            kind = None
+        decoded.append(kind)
+        if kind in ("world", "pose"):
+            latest[kind] = index
+    return [
+        raw for index, raw in enumerate(packets)
+        if decoded[index] not in ("world", "pose") or latest[decoded[index]] == index
+    ]
+
+
 def exchange(route, body, client_ip="-"):
     now = time.monotonic()
     with LOCK:
@@ -76,9 +95,9 @@ def exchange(route, body, client_ip="-"):
             other = next(value for key, value in room.items() if key != token)
             peer_active = now - other["last"] <= PEER_STALE_AFTER
             if peer_active:
-                other["inbox"].extend(packets)
+                other["inbox"] = newest_snapshots(other["inbox"] + packets)
             del other["inbox"][:-96]
-        inbox, player["inbox"] = player["inbox"], []
+        inbox, player["inbox"] = newest_snapshots(player["inbox"]), []
         return 200, {"connected": connected, "peerActive": peer_active, "packets": inbox}
 
 

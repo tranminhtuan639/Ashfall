@@ -218,8 +218,27 @@
       }
       return result;
     };
+    function newestSnapshots(packets) {
+      const latest = new Map();
+      for (let index = 0; index < packets.length; index++) {
+        try {
+          const type = JSON.parse(packets[index]).type;
+          if (type === "world" || type === "pose") latest.set(type, index);
+        } catch {}
+      }
+      return packets.filter((raw, index) => {
+        try {
+          const type = JSON.parse(raw).type;
+          return !latest.has(type) || latest.get(type) === index;
+        } catch { return true; }
+      });
+    }
     function send(packet) {
-      if (connected && outbound.length < 64) outbound.push(JSON.stringify(packet, (_, value) =>
+      if (!connected) return;
+      if (packet.type === "world" || packet.type === "pose") {
+        outbound = outbound.filter(raw => JSON.parse(raw).type !== packet.type);
+      }
+      if (outbound.length < 64) outbound.push(JSON.stringify(packet, (_, value) =>
         typeof value === "number" && !Number.isInteger(value) ? Number(value.toFixed(4)) : value));
     }
     function leave(message = "", intent = null) {
@@ -532,7 +551,7 @@
           connected = true;
           startSession();
         }
-        for (const packet of data.packets) receive(packet);
+        for (const packet of newestSnapshots(data.packets)) receive(packet);
       } catch (error) {
         console.error("[LAN] Could not apply relay packets", error);
         leave("Lỗi đồng bộ LAN. Xem Console ở trình duyệt này để biết chi tiết.");
