@@ -41,7 +41,7 @@
           raptor("north", 180, 1, true), raptor("north", 180, 1, true), raptor("north", 3600, 3, true),
           giga("west", 30000, "purple", true), giga("east", 30000, "yellow", true),
         ],
-        [{ kind: "spino", side: "east", hp: 66000 }],
+        [{ kind: "spino", side: "east", hp: 70000 }],
       ],
     ];
     const lines = {
@@ -64,11 +64,18 @@
       else hud.radio(lines[key], (clip?.seconds ?? 4.5) + .25, clip ? key : null);
     }
     function queueReinforcements(specs, line) {
+      // SPINO_BOUND_GIGAS_V1: only the pair summoned at half health.
+      if (line === "halfCall") for (const spec of specs) {
+        spec.hp = 5000000;
+        spec.giant = true;
+        spec.spinoBound = true;
+      }
       const batch = { remaining: specs.length, line };
       for (const spec of specs) pending.push({ ...spec, batch, delay: 0 });
     }
     const ankyloAlive = new Map();
     const pending = [];
+    const spinoBoundGigas = new Set();
     const mixedSlots = [...gigas.slice(3, 6), ...gigas.slice(16, 18)];
     const minionSlots = gigas.slice(6, 10);
     const giantSlots = gigas.slice(10, 12);
@@ -104,6 +111,7 @@
       boss = null;
       ankyloAlive.clear();
       pending.length = 0;
+      spinoBoundGigas.clear();
       transport.health = 100;
       transport.setReady(false);
       hud.setStageCountdown(null);
@@ -130,7 +138,7 @@
       for (const unit of gigas) if (unit.alive) occupied.push(unit.position);
       const pos = openPoint(spec.pos || gates[spec.side], occupied);
       if (!pos) return false;
-      const hp = Math.max(1, Math.round(spec.hp * (game.runDifficulty?.enemyHealth ?? 1)));
+      const hp = spec.spinoBound ? 5000000 : Math.max(1, Math.round(spec.hp * (game.runDifficulty?.enemyHealth ?? 1)));
       if (spec.kind === "raptor") {
         const unit = raptors.find(raptor => !raptor.started || raptor.done);
         if (!unit) return false;
@@ -158,6 +166,7 @@
           return false;
         }
         unit.start(pos, hp, { ...spec, corpse: 15 });
+        if (spec.spinoBound) spinoBoundGigas.add(unit);
         if (stage === 2 && wave === 1) duo[spec.variant === "yellow" ? 1 : 0] = unit;
       } else {
         spino.start(pos, position => {
@@ -279,6 +288,13 @@
           }
           queueReinforcements(specs, purpleSummons === 2 ? "repeatCall" : "repeatAgain");
         });
+      }
+      if (spino?.started && spino.done) {
+        for (let index = pending.length-1; index >= 0; index--) {
+          if (pending[index].spinoBound) pending.splice(index,1);
+        }
+        for (const unit of spinoBoundGigas) if (unit.alive) unit.endWithSpino();
+        spinoBoundGigas.clear();
       }
       if (stage === 2 && wave === 1) {
         const showDuo = duo[0] && duo[1] && duo.every(unit => !unit.invulnerable);

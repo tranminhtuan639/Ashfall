@@ -30,6 +30,17 @@
     mount.visible = false;
     game.camera.add(mount);
     let model, requested = false, visible = false, flashTime = 0;
+    let flashScale = 1, vaporT = 0; // M416 ICE FX
+    const vaporPos = new lt.Vector3(), vaporDir = new lt.Vector3();
+    function rifleWorld(x, y, z, out) {
+      out.set(x, y, z).applyMatrix4(model.rifle.matrixWorld);
+      game.camera.worldToLocal(out);
+      const ratio = Math.tan(game.camera.fov * Math.PI / 360) /
+        Math.tan(game.viewCamera.fov * Math.PI / 360);
+      out.x *= ratio;
+      out.y *= ratio;
+      return game.camera.localToWorld(out);
+    }
     const muzzleLocal = new lt.Vector3(), muzzleView = new lt.Vector3();
     const aimPoint = new lt.Vector3(), motion = new lt.Vector3();
     const sightInCamera = new lt.Vector3();
@@ -49,6 +60,15 @@
     core.layers.mask = layer;
     core.renderOrder = flash.renderOrder + 1;
     flash.add(core);
+    // quầng sáng xanh băng bao quanh tia lóe (M416 ICE FX)
+    const halo = new lt.Mesh(new lt.ConeGeometry(.024, .05, 9),
+      new lt.MeshBasicMaterial({
+        color: 0x38d8ff, transparent: true, opacity: .32, depthWrite: false, toneMapped: false,
+        blending: lt.AdditiveBlending,
+      }));
+    halo.layers.mask = layer;
+    halo.renderOrder = flash.renderOrder - 1;
+    flash.add(halo);
 
     const flashAxis = new lt.Vector3(), flashTip = new lt.Vector3();
     const flashUp = new lt.Vector3(0, 1, 0);
@@ -389,6 +409,7 @@
     game.events.on("weapon:fire", () => {
       if (!visible) return;
       flashTime = .04;
+      flashScale = .85 + Math.random() * .75;
       if (weapon.ads > .7) adsKick = Math.min(1.5, adsKick + 1);
     });
     weapon.ravenMuzzleWorld = out => {
@@ -505,7 +526,26 @@
         flashAxis.subVectors(flashTip, flash.position).normalize();
         flash.quaternion.setFromUnitVectors(flashUp, flashAxis);
         // Cone geometry is centered; keep its rear edge beyond the muzzle.
-        flash.position.addScaledVector(flashAxis, flashLength / 2 + .014);
+        flash.scale.set(flashScale, flashScale * 1.25, flashScale);
+        flash.position.addScaledVector(flashAxis, flashLength / 2 * flashScale * 1.25 + .014);
+      }
+      // Hơi lạnh toả từ thân súng băng: sương nặng, trôi chậm, chìm xuống (thưa + nhạt khi ngắm để không che tầm nhìn)
+      const iceFx = game.fx;
+      if (iceFx && iceFx.iceMist) {
+        vaporT -= dt;
+        if (vaporT <= 0) {
+          vaporT = lt.MathUtils.lerp(.1, .32, aim) * (.85 + Math.random() * .3);
+          mount.updateWorldMatrix(true, true);
+          rifleWorld(muzzleLocal.x - .05 - Math.random() * .4, muzzleLocal.y - .012 - Math.random() * .03,
+            muzzleLocal.z + (Math.random() - .5) * .03, vaporPos);
+          game.camera.getWorldDirection(vaporDir);
+          vaporDir.multiplyScalar(.35);
+          vaporDir.y -= .75;
+          vaporDir.normalize();
+          iceFx.iceMist(vaporPos, vaporDir, {
+            count: 1, size: .06, speed: .45, spread: .9, life: 1.9, alpha: .14 * (1 - .6 * aim), sink: .3,
+          });
+        }
       }
     };
   }

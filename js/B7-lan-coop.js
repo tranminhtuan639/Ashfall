@@ -4,7 +4,7 @@
     const { raptors, transport } = defense;
     const bosses = () => [...game.gigas, game.spino];
     const beamFrames = new Map(), replicaBeams = new Map();
-    let nextBeamId = 0, flameFrames = [], remoteFlames = [], frameAnkylos = [], remoteExtract = false;
+    let nextBeamId = 0, flameFrames = [], remoteFlames = [], frameAnkylos = [], frameWoodAllies = [], remoteExtract = false;
     let stageStarted = 0, guestStage = 0, transportReady = false, phase = "waiting";
     let loadingReserve = false, requiredGigas = 0;
     const v3 = array => array ? new W().fromArray(array) : null;
@@ -14,6 +14,7 @@
       flameFrames = [];
       remoteFlames = [];
       frameAnkylos = [];
+      frameWoodAllies = [];
     }
     const sentries = createArenaSentries(game);
     const difficulty = { easy: { sentryLimit: 8, enemyHealth: .55 },
@@ -146,6 +147,7 @@
     let role, credentials, generation = 0, outbound = [], poseOut = null, worldQueue = [], connected = false, lanPing = 0;
     let lastPoll = 0, retrySince = null, peerActive = true;
     let synced = false, nextSend = 0, nextShotBudgetAt = 0, shotBudget = 3;
+    let nextIceDeploy = 0, nextWoodDeploy = 0;
     let reason = "", nextDeploy = 0, lastGuestHit = 0, displayedEnd = false;
     let snapshots = [], eventQueue = [], renderTs = null, latestTs = 0, appliedSeq = -1, snapshotSeq = 0;
 
@@ -172,13 +174,13 @@
         <select id="lan-difficulty"><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard" selected>Hard</option></select>
         <p>Click to aim. [1] Deploy a team sentry. [E] Resupply at an ammo crate.</p>
         <button data-host>Host</button><button data-join>Join</button>
-        <div data-entry hidden><label for="arena-lan-code">Mã phòng</label>
+        <div data-entry hidden><label for="arena-lan-code">Room code</label>
           <input id="arena-lan-code" inputmode="numeric" maxlength="6" autocomplete="off">
-          <button data-enter>Vào phòng</button></div>
+          <button data-enter>Join room</button></div>
         <p class="arena-lan-status" data-status role="status"></p>
-        <button data-cancel hidden>Quay lại</button>
+        <button data-cancel hidden>Back</button>
       </div>
-      <div class="arena-lan-match" hidden><p data-match></p><button data-leave>Rời phòng</button></div>`;
+      <div class="arena-lan-match" hidden><p data-match></p><button data-leave>Leave room</button></div>`;
     document.getElementById("app").append(ui);
     const node = selector => ui.querySelector(selector);
     const panel = node(".arena-lan-panel"), match = node(".arena-lan-match"), entry = node("[data-entry]");
@@ -187,6 +189,8 @@
     const cancel = node("[data-cancel]"), difficultyInput = node("#lan-difficulty");
     game.lan = {
       players: () => [player, remote],
+      woodOwners: () => [["host", player], ["guest", remote]],
+      woodShot: (from, to) => send({ type: "woodShot", from: from.toArray(), to: to.toArray() }),
       target(from) {
         if (!remote.alive) return player;
         if (!player.alive) return remote;
@@ -198,7 +202,7 @@
         if (frame) beamFrames.set(id, frame);
         else beamFrames.delete(id);
       },
-      sentryShot: (from, to) => send({ type: "sentry", from: from.toArray(), to: to.toArray() }),
+      sentryShot: (from, to, ice = false) => send({ type: "sentry", from: from.toArray(), to: to.toArray(), ice }),
     };
     player.reset(level.playerStart);
     player.enabled = false;
@@ -211,9 +215,9 @@
       });
       let result;
       try { result = await response.json(); }
-      catch { throw new Error("Hãy mở game qua ashfall_coop_server.py."); }
+      catch { throw new Error("Start the game using ashfall_coop_server.py."); }
       if (!response.ok) {
-        const error = new Error(result.error || "Máy Host không phản hồi.");
+        const error = new Error(result.error || "The host is not responding.");
         error.status = response.status;
         throw error;
       }
@@ -328,9 +332,10 @@
       persistentAudio.clear();
       resetTimeline();
       game.enemies.clear();
+      game.woodAnkylos.reset();
       clearReplicas();
       lastGuestHit = remote.hit = 0;
-      nextSend = nextDeploy = 0;
+      nextSend = nextDeploy = nextIceDeploy = nextWoodDeploy = 0;
       if (role === "host") {
         game.runDifficulty = difficulty[difficultyInput.value] || difficulty.hard;
         campaignGame.runDifficulty = game.runDifficulty;
@@ -418,6 +423,19 @@
           nextDeploy = performance.now() + 250;
           if (!sentries.place(remote)) send({ type: "deployDenied" });
         }
+        if (packet.type === "deployIce" && phase === "active" &&
+            remote.alive && viewPacket(packet.pose) && remote.characterKnown && !remote.triplet &&
+            performance.now() >= nextIceDeploy) {
+          nextIceDeploy = performance.now() + 250;
+          if (!sentries.placeIce(remote, "guest")) send({ type: "deployDenied" });
+        }
+        if (packet.type === "deployWood" && phase === "active" &&
+            remote.alive && viewPacket(packet.pose) && remote.characterKnown && remote.triplet &&
+            performance.now() >= nextWoodDeploy) {
+          nextWoodDeploy = performance.now() + 250;
+          const error = game.woodAnkylos.deploy(remote, "guest");
+          if (error) send({ type: "woodDenied", message: error });
+        }
         if (packet.type === "extract" && transportReady && viewPacket(packet.pose)) remoteExtract = true;
         if (packet.type !== "shot" || phase !== "active" || !remote.alive || !viewPacket(packet.pose) ||
             !Array.isArray(packet.direction) || packet.direction.length !== 3 ||
@@ -466,10 +484,18 @@
       if (packet.type === "radio") { hud.radio(packet.line, packet.seconds, packet.clip); return; }
       if (packet.type === "music") { game.events.emit("arena:music", packet.settings); return; }
       if (packet.type === "deployDenied") { hud.message("Cannot deploy a sentry here", 1.4); return; }
+      if (packet.type === "woodDenied") { hud.message(packet.message, 1.4); return; }
+      if (packet.type === "woodShot" && Array.isArray(packet.from) && Array.isArray(packet.to)) {
+        drawWoodAnkyloShot(game, v3(packet.from), v3(packet.to));
+        return;
+      }
       if (packet.type === "sentry") {
         const from = origin.fromArray(packet.from), to = endpoint.fromArray(packet.to);
-        game.fx?.muzzleFlash?.(from, shotDirection.subVectors(to, from).normalize(), { scale: .65 });
-        game.fx?.tracer?.(from, to, { trail: false, intensity: 10 });
+        game.fx?.muzzleFlash?.(from, shotDirection.subVectors(to, from).normalize(), {
+          scale: packet.ice ? .85 : .65, color: packet.ice ? 0x00f0ff : undefined,
+        });
+        game.fx?.tracer?.(from, to, { trail: false, intensity: 10,
+          color: packet.ice ? 0x00f0ff : undefined, coreColor: packet.ice ? 0xc9faff : undefined });
         game.audio?.play?.("sentry_shot", { pos: from, gain: .65 });
         return;
       }
@@ -518,6 +544,13 @@
         out.gigas = a.gigas.map((sa, index) => blendBoss(sa, b.gigas[index], t));
       }
       out.spino = blendBoss(a.spino, b.spino, t);
+      out.woodAllies = (a.woodAllies || []).map(sa => {
+        const sb = (b.woodAllies || []).find(item => item.owner === sa.owner && (item.slot ?? 0) === (sa.slot ?? 0) && item.serial === sa.serial);
+        if (!sb || (sa.hp > 0) !== (sb.hp > 0)) return sa;
+        return { ...sa, position: lerpVec(sa.position, sb.position, t),
+          yaw: lerpAngle(sa.yaw, sb.yaw, t), speed: lerp(sa.speed, sb.speed, t),
+          turretYaw: lerpAngle(sa.turretYaw, sb.turretYaw, t), pitch: lerp(sa.pitch, sb.pitch, t) };
+      });
       if (Array.isArray(a.ankylos) && Array.isArray(b.ankylos)) {
         out.ankylos = a.ankylos.map(da => {
           const db = b.ankylos.find(item => item[0] === da[0]);
@@ -613,6 +646,7 @@
       packet.gigas.forEach((snapshot, index) => game.gigas[index]?.lanApply(snapshot));
       game.spino.lanApply(packet.spino);
       frameAnkylos = packet.ankylos;
+      frameWoodAllies = packet.woodAllies || [];
     }
 
     function ensureReserve() {
@@ -646,7 +680,7 @@
       } catch (error) {
         if (epoch !== generation) return;
         if ([403, 404, 410].includes(error.status)) {
-          leave(error.status === 404 ? "Phiên LAN đã kết thúc. Hãy tạo phòng mới." : error.message);
+          leave(error.status === 404 ? "This co-op session has ended. Create a new room." : error.message);
           return;
         }
         retrySince ??= performance.now();
@@ -654,10 +688,10 @@
         poseOut = null;
         worldQueue = [];
         if (performance.now() - retrySince >= 120000) {
-          leave("Mất kết nối tới relay quá lâu. Kiểm tra máy Host rồi tạo phòng mới.");
+          leave("Relay connection timed out. Check the host and create a new room.");
           return;
         }
-        if (!connected) status.textContent = "Đang thử kết nối lại với relay…";
+        if (!connected) status.textContent = "Reconnecting to the relay...";
         setTimeout(() => poll(epoch), 500);
         return;
       }
@@ -673,7 +707,7 @@
         for (const packet of newestSnapshots(data.packets)) receive(packet);
       } catch (error) {
         console.error("[LAN] Could not apply relay packets", error);
-        leave("Lỗi đồng bộ LAN. Xem Console ở trình duyệt này để biết chi tiết.");
+        leave("Co-op synchronization failed. Check this browser console for details.");
         return;
       }
       setTimeout(() => poll(epoch), connected ? 0 : 230);
@@ -681,7 +715,7 @@
     async function joinRoom(mode) {
       const code = codeInput.value.trim();
       if (mode === "join" && !/^\d{6}$/.test(code)) {
-        status.textContent = "Nhập mã phòng gồm 6 số.";
+        status.textContent = "Enter a six-digit room code.";
         return;
       }
       if (raptors.length < 9) {
@@ -693,13 +727,13 @@
       hostButton.disabled = joinButton.disabled = enter.disabled = true;
       cancel.hidden = false;
       difficultyInput.disabled = true;
-      status.textContent = mode === "host" ? "Đang tạo phòng…" : "Đang vào phòng…";
+      status.textContent = mode === "host" ? "Creating room..." : "Joining room...";
       try {
         const result = await api(mode, mode === "join" ? { code, protocol: 2 } : { protocol: 2 });
         if (epoch !== generation) { api("leave", { ...result, intent: "cancel-setup" }).catch(() => {}); return; }
         role = mode;
         credentials = result;
-        status.textContent = mode === "host" ? `Mã phòng: ${result.code} · Đang chờ người Join` : "Đang kết nối…";
+        status.textContent = mode === "host" ? `Room code: ${result.code} · Waiting for a teammate` : "Connecting...";
         poll(epoch);
       } catch (error) {
         if (epoch === generation) leave(error.message);
@@ -747,6 +781,13 @@
         if (!campaign.update(dt) && phase === "active") phase = "defeat";
         if (phase === "active") {
           game.enemies.update(dt);
+          if (player.alive && game.character?.weapon?.viewmodel === "raven" && input.pressed("alt")) {
+            if (!sentries.placeIce(player, "host")) hud.message("Cannot deploy an ice sentry here", 1.4);
+          }
+          if (player.alive && localTriplet && input.pressed("alt")) {
+            const error = game.woodAnkylos.deploy(player, "host");
+            if (error) hud.message(error, 1.4);
+          }
           sentries.update(dt);
         }
       }
@@ -789,10 +830,15 @@
       } else {
         playback(dt);
         game.enemies.lanApply(frameAnkylos, dt);
+        game.woodAnkylos.apply(frameWoodAllies, dt);
         drawRemoteEffects(dt);
         for (const unit of raptors) unit.lanAnimate(dt);
         if (phase === "active") {
           defense.updateAmmoPickup();
+          if (player.alive && game.character?.weapon?.viewmodel === "raven" && input.pressed("alt"))
+            send({ type: "deployIce", pose: pose() });
+          if (player.alive && localTriplet && input.pressed("alt"))
+            send({ type: "deployWood", pose: pose() });
           if (player.alive && input.pressed("deploySentry")) send({ type: "deploy", pose: pose() });
           if (transportReady && player.alive && transport.nearby(player.pos)) {
             hud.setPrompt("[2] Extract", 0, "status");
@@ -807,6 +853,7 @@
           guestReviveSeconds: guestRevive.seconds(), phase, reason, hud: worldHud,
           stage: campaign.stage, wave: campaign.wave, stageStarted, transportReady,
           raptors: raptors.map(unit => unit.lanSnapshot()), sentries: sentries.lanSnapshot(),
+          woodAllies: game.woodAnkylos.snapshot(),
           ankylos: game.enemies.lanSnapshot(), gigas: game.gigas.map(unit => unit.lanSnapshot()),
           spino: game.spino.lanSnapshot(),
           beams: [...beamFrames], flames: flameFrames }
@@ -838,8 +885,8 @@
         : transportReady ? "Board the transport · [2] Extract"
         : `Stage ${role === "host" ? campaign.stage : worldHud.stage} · Wave ${role === "host" ? campaign.wave : worldHud.wave}`;
       const seconds = role === "host" ? hostRevive.seconds() : guestReviveSeconds;
-      const spectating = !observing ? "" : seconds === null ? " · Chờ sang màn để hồi sinh"
-        : ` · Hồi sinh sau ${seconds}s`;
+      const spectating = !observing ? "" : seconds === null ? " · Respawn at the next stage"
+        : ` · Respawning in ${seconds}s`;
       const text = `${role === "host" ? "HOST" : "GUEST"} · ${label}${spectating} · ${lanPing}ms`;
       if (matchText.textContent !== text) matchText.textContent = text;
       weapon.setVisible?.(!observing && !ended);

@@ -273,6 +273,7 @@
         if (remaining > 0) return;
         if (state === "charge") {
           blast();
+          game.woodAnkylos?.blast(raptor.pos.clone().setY(.7), 4, 35);
           if (huntsPlayer) {
             const source = raptor.pos.clone().setY(.7);
             for (const player of game.lan?.players() || [game.player]) {

@@ -1957,12 +1957,14 @@ void main() {
       p = new j1(i, 160),
       d = new wt();
     ((d.name = "fx"), d.add(p.mesh, h.mesh, f.mesh, r.mesh, a.mesh), e.add(d));
-    let v = 0,
+    let iceTint = 0,
+      v = 0,
       g = -1,
       x = -1,
       y = () => i.render && i.render.lightPool,
       b = (ee, B, P, V, Y) => {
         let L = y();
+        iceTint && typeof B === "number" && (B = ((B & 255) << 16) | (B & 65280) | ((B >> 16) & 255));
         L && L.flash(ee, B, P, V, Y);
       };
     function m(ee, B) {
@@ -2011,6 +2013,7 @@ void main() {
           _e);
     }
     function M(ee, B, P, V, Y, L, Z, J, oe, fe, le, R) {
+      if (iceTint) { const t = oe; oe = le; le = t; fe *= 1.25; }
       let I = c.emit(ee, B, P, V, Y, L, Z, J, J * 0.5);
       return I < 0
         ? -1
@@ -2019,7 +2022,7 @@ void main() {
           (c.stretch[I] = 0.03),
           (c.grav[I] = 9.81),
           (c.drag[I] = 0.9),
-          (c.ramp[I] = 1),
+          (c.ramp[I] = iceTint ? 4 : 1),
           (c.r[I] = oe * 0.6),
           (c.g[I] = fe * 0.6),
           (c.b[I] = le * 0.6),
@@ -2049,6 +2052,7 @@ void main() {
       }
     }
     function w(ee, B, P, V, Y, L, Z, J, oe, fe) {
+      if (iceTint) { const t = Z; Z = oe; oe = t; J *= 1.1; }
       let le = c.emit(ee, B, P, 0, 0, 0, V, Y, L);
       return le < 0
         ? -1
@@ -2062,6 +2066,7 @@ void main() {
           le);
     }
     function S(ee, B, P, V, Y, L, Z, J, oe) {
+      if (iceTint) { const t = Z; Z = oe; oe = t; J *= 1.1; }
       let fe = c.emit(ee, B, P, 0, 0, 0, V, Y, L);
       return fe < 0
         ? -1
@@ -3382,7 +3387,16 @@ void main() {
       }
     }
     i.events.on("impact", (ee) => {
-      !ee || !ee.point || C(ee.point, ee.normal, ee.surface, ee.dir, ee.enemy);
+      if (!ee || !ee.point) return;
+      // M416 ICE FX: A0-weapon-hud đặt i.iceFxUntil khi bắn súng băng; đạn của enemy/quái không bị tô màu
+      const ice = !!(i.iceFxUntil > performance.now()) && ee.from !== "enemy" && ee.surface !== "enemy";
+      if (ice && !ee.enemy) iceTint = 1;
+      try {
+        C(ee.point, ee.normal, ee.surface, ee.dir, ee.enemy);
+      } finally {
+        iceTint = 0;
+      }
+      if (ice) iceImpact(ee.point, ee.normal, ee.dir, { scale: ee.enemy ? 0.6 : 1 });
     });
     let $ = (ee, B) => {
       try {
@@ -3770,6 +3784,154 @@ void main() {
         L.distance = 10 + 22 * pr; L.intensity = (30 + 240 * pr) * flick;
       }
     }
+    // ===== M416 ICE FX =====
+    // Sương băng = các hạt nước li ti lơ lửng: trắng ngả xanh, to, mờ, trôi chậm và CHÌM xuống (khí lạnh nặng hơn không khí).
+    const ICE = {
+      mist: [0.80, 0.93, 1.0],      // màu sương
+      glow: 2.1,                    // nhân sáng (hạt lit bị ambient làm tối nên cần bù)
+      flash: [0.28, 0.85, 1.0],     // màu lóe nòng
+      shard: [4.5, 13, 18],         // màu mảnh băng (additive)
+    };
+    const iceV = new W(), iceR = new W(), iceU = new W(), iceP = new W(), iceQ = new W();
+    function iceFrame(dir) {
+      iceV.copy(dir);
+      if (iceV.lengthSq() < 1e-6) iceV.set(0, 1, 0);
+      iceV.normalize();
+      iceU.set(0, 1, 0);
+      if (Math.abs(iceV.y) > 0.95) iceU.set(1, 0, 0);
+      iceR.crossVectors(iceV, iceU).normalize();
+      iceU.crossVectors(iceR, iceV).normalize();
+    }
+    function mistPuff(x, y, z, vx, vy, vz, life, s0, s1, alpha, shade, sink, drag) {
+      const k = Ze(0.92, 1.08) * ICE.glow;
+      const id = _(x, y, z, vx, vy, vz, life, s0, s1,
+        ICE.mist[0] * k, ICE.mist[1] * k, ICE.mist[2] * k, alpha, shade, drag, -sink, 0.3, -1);
+      if (id >= 0) {
+        l.turb[id] = 0.45; l.fin[id] = 0.14; l.fout[id] = 0.4; l.sk[id] = 1.7;
+        l.rotv[id] = (ht() - 0.5) * 0.45;
+      }
+      return id;
+    }
+    function iceMist(origin, dir, o = {}) {
+      const n = o.count || 3, size = o.size || 0.12, sp = o.speed === void 0 ? 1.6 : o.speed,
+        spread = o.spread === void 0 ? 0.5 : o.spread, life = o.life || 1.4,
+        alpha = o.alpha || 0.22, sink = o.sink === void 0 ? 0.25 : o.sink;
+      iceFrame(dir);
+      const shade = Math.max(0.6, m(origin, null));
+      for (let k = 0; k < n; k++) {
+        const a = ht() * 6.283, r = Math.sqrt(ht()) * spread, f = Ze(0.35, 1) * sp;
+        const ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+        mistPuff(
+          origin.x + iceV.x * Ze(0, 0.05) + (ht() - 0.5) * 0.03,
+          origin.y + iceV.y * Ze(0, 0.05) + (ht() - 0.5) * 0.03,
+          origin.z + iceV.z * Ze(0, 0.05) + (ht() - 0.5) * 0.03,
+          (iceV.x + iceR.x * ca + iceU.x * sa) * f,
+          (iceV.y + iceR.y * ca + iceU.y * sa) * f,
+          (iceV.z + iceR.z * ca + iceU.z * sa) * f,
+          life * Ze(0.75, 1.25), size * Ze(0.6, 1), size * Ze(3, 5), alpha * Ze(0.7, 1.1), shade, sink, 1.5);
+      }
+    }
+    function iceShard(x, y, z, vx, vy, vz, life, size, boost) {
+      const id = c.emit(x, y, z, vx, vy, vz, life, size, size * 0.4);
+      if (id < 0) return -1;
+      c.mode[id] = 1; c.frame[id] = _v; c.stretch[id] = 0.035; c.grav[id] = 7; c.drag[id] = 1.0;
+      c.ramp[id] = 4; c.r[id] = ICE.shard[0] * boost; c.g[id] = ICE.shard[1] * boost; c.b[id] = ICE.shard[2] * boost;
+      c.fout[id] = 0.5; c.flags[id] = Xc; c.sk[id] = 1;
+      return id;
+    }
+    function iceGlint(x, y, z, life, size, boost) {
+      const id = c.emit(x, y, z, 0, 0, 0, life, size, size * 0.3);
+      if (id < 0) return -1;
+      c.frame[id] = oo; c.r[id] = 5 * boost; c.g[id] = 15 * boost; c.b[id] = 20 * boost; c.ramp[id] = 4;
+      c.fin[id] = 0.1; c.fout[id] = 0.5; c.rot[id] = ht() * 6.283; c.sk[id] = 1;
+      return id;
+    }
+    function iceMuzzle(pos, dir, o = {}) {
+      const ads = o.ads || 0, V = (o.scale || 1) * (1 - 0.5 * ads), f = ICE.flash;
+      zt.copy(dir || Ei);
+      if (zt.lengthSq() < 1e-6) zt.set(0, 0, -1);
+      zt.normalize();
+      const x = pos.x, y = pos.y, z = pos.z;
+      w(x + zt.x * 0.07, y + zt.y * 0.07, z + zt.z * 0.07, 0.05, 0.22 * V, 0.34 * V, 22 * f[0], 22 * f[1], 22 * f[2], n0);
+      w(x + zt.x * 0.04, y + zt.y * 0.04, z + zt.z * 0.04, 0.04, 0.10 * V, 0.16 * V, 20, 24, 26, oo);
+      const R = c.emit(x + zt.x * 0.25 * V, y + zt.y * 0.25 * V, z + zt.z * 0.25 * V, -zt.x, -zt.y, -zt.z, 0.04, 0.07 * V, 0.09 * V);
+      if (R >= 0) {
+        c.mode[R] = 1; c.frame[R] = W1; c.stretch[R] = 0.7 * V;
+        c.r[R] = 14 * f[0]; c.g[R] = 14 * f[1]; c.b[R] = 14 * f[2]; c.fout[R] = 0.3;
+      }
+      const ns = ads > 0.5 ? 2 : 4;
+      for (let k = 0; k < ns; k++) {      // mảnh băng bắn ra khỏi nòng
+        ro(zt, 0.35, iceP);
+        const sp = Ze(5, 15);
+        iceShard(x, y, z, iceP.x * sp, iceP.y * sp, iceP.z * sp, Ze(0.12, 0.3), 0.012, Ze(0.7, 1.1));
+      }
+      iceMist(pos, zt, {                  // luồng sương phụt ra theo hướng bắn
+        count: ads > 0.5 ? 2 : 4, size: 0.09 * (1 - 0.3 * ads), speed: 3.2, spread: 0.6,
+        life: 1.25, alpha: 0.26 * (1 - 0.5 * ads), sink: 0.22,
+      });
+    }
+    function iceTrail(p0, p1) {           // đuôi sương mờ + lấp lánh dọc đường đạn
+      iceQ.subVectors(p1, p0);
+      const L = iceQ.length();
+      if (L < 2.5) return;
+      iceQ.multiplyScalar(1 / L);
+      const len = Math.min(L, 18), shade = Math.max(0.6, m(p0, null));
+      for (let k = 0; k < 3; k++) {
+        const d = 1.4 + ((k + ht()) / 3) * (len - 1.4);
+        mistPuff(p0.x + iceQ.x * d, p0.y + iceQ.y * d, p0.z + iceQ.z * d,
+          iceQ.x * 0.4 + (ht() - 0.5) * 0.2, (ht() - 0.5) * 0.2, iceQ.z * 0.4 + (ht() - 0.5) * 0.2,
+          Ze(0.7, 1.2), 0.05, Ze(0.28, 0.5), 0.10, shade, 0.1, 1.8);
+      }
+      if (ht() < 0.6) {
+        const d = Ze(1.5, len);
+        iceGlint(p0.x + iceQ.x * d, p0.y + iceQ.y * d, p0.z + iceQ.z * d, Ze(0.25, 0.5), Ze(0.03, 0.06), 1);
+      }
+    }
+    // Gọi 1 lần cho mỗi viên: tia đạn cyan + lóe nòng + sương nòng + đuôi sương.
+    function iceShot(origin, end, dir, o = {}) {
+      G(origin, end, { color: o.tracer, coreColor: o.core, trail: false, intensity: 12, width: 0.02, speed: 300 });
+      iceMuzzle(origin, dir, { ads: o.ads });
+      iceTrail(origin, end);
+    }
+    // Điểm trúng: sương bung + lan sát mặt, mảnh băng văng theo hướng phản xạ, lấp lánh.
+    function iceImpact(point, normal, dir, o = {}) {
+      const sc = o.scale || 1;
+      iceQ.copy(normal || Ei);
+      if (iceQ.lengthSq() < 1e-6) iceQ.copy(Ei);
+      iceQ.normalize();
+      iceV.copy(dir && dir.lengthSq() > 1e-6 ? dir : iceQ).normalize();
+      const d0 = iceV.dot(iceQ);
+      iceV.addScaledVector(iceQ, -2 * d0).normalize();     // hướng phản xạ
+      const px = point.x, py = point.y, pz = point.z, nx = iceQ.x, ny = iceQ.y, nz = iceQ.z;
+      const shade = Math.max(0.6, m(point, iceQ));
+      for (let k = 0; k < Math.round(5 * sc); k++) {
+        ro(iceQ, 1.0, iceP);
+        const sp = Ze(0.8, 3.2);
+        mistPuff(px + nx * 0.12, py + ny * 0.12, pz + nz * 0.12, iceP.x * sp, iceP.y * sp + 0.3, iceP.z * sp,
+          Ze(1.0, 1.8), 0.18 * sc, Ze(0.7, 1.2) * sc, 0.22, shade, 0.18, 1.4);
+      }
+      for (let k = 0; k < Math.round(4 * sc); k++) {       // sương lan sát mặt
+        ro(iceQ, 3, iceP);
+        iceP.addScaledVector(iceQ, -iceP.dot(iceQ));
+        if (iceP.lengthSq() < 1e-4) continue;
+        iceP.normalize();
+        const sp = Ze(1.5, 4);
+        mistPuff(px + nx * 0.06, py + ny * 0.06, pz + nz * 0.06, iceP.x * sp, iceP.y * sp, iceP.z * sp,
+          Ze(1.2, 2.0), 0.15 * sc, Ze(0.8, 1.4) * sc, 0.18, shade, 0.1, 1.6);
+      }
+      for (let k = 0; k < Math.round(9 * sc); k++) {
+        ro(iceV, 0.9, iceP);
+        const sp = Ze(4, 13);
+        iceShard(px + nx * 0.03, py + ny * 0.03, pz + nz * 0.03, iceP.x * sp, iceP.y * sp, iceP.z * sp,
+          Ze(0.2, 0.5), 0.012, Ze(0.7, 1.1));
+      }
+      for (let k = 0; k < Math.round(5 * sc); k++) {
+        ro(iceQ, 1.0, iceP);
+        const r = Ze(0.05, 0.4);
+        iceGlint(px + iceP.x * r, py + iceP.y * r, pz + iceP.z * r, Ze(0.3, 0.7), Ze(0.03, 0.07), 1);
+      }
+    }
+    // ===== /M416 ICE FX =====
     function ue(ee) {
       (ee > 0 || (ee = 0), (v += ee), re(ee));
       jetIdle += ee;
@@ -3797,6 +3959,10 @@ void main() {
       (r.begin(), r.end(), a.begin(), a.end());
     }
     return {
+      iceMist,
+      iceMuzzle,
+      iceShot,
+      iceImpact,
       flameJet,
       beamJet,
       beamCharge,
@@ -8637,6 +8803,8 @@ void main() {
           const a = i.level?.raycastArena?.(n, s, physicsHit?.dist ?? r) || physicsHit;
           let l = a ? a.dist : r,
             c = targetPlayer || i.player;
+          const woodHit = i.woodAnkylos?.raycast(n, s, l);
+          if (woodHit) l = woodHit.dist;
           if (c && c.alive) {
             let u = nm.copy(c.pos);
             u.y += 1;
@@ -8647,6 +8815,12 @@ void main() {
               if (Math.hypot(zf.x - c.pos.x, zf.z - c.pos.z) < 0.38 && f < 0.95)
                 return (c.damage(o, n), !0);
             }
+          }
+          if (woodHit) {
+            woodHit.unit.damage(o);
+            i.events.emit("impact", { point: woodHit.point, normal: s.clone().negate(),
+              dist: woodHit.dist, surface: "wood", enemy: null, dir: s, from: "enemy" });
+            return true;
           }
           return (
             a &&
@@ -8663,6 +8837,7 @@ void main() {
           );
         },
         explode(n, s = 5, o = 80, r = "player") {
+          i.woodAnkylos?.blast(n, s, o * .5);
           for (let l of i.enemies.list) {
             if (!l.alive) continue;
             let c = l.pos.distanceTo(n);

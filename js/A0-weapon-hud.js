@@ -3056,6 +3056,7 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
         .normalize()
         .applyQuaternion(we.quaternion),
         Ie.copy(Me.eye || we.position));
+      i.iceFxUntil = ve.ravenIceEffects?.() ? performance.now() + 250 : 0; // M416 ICE FX
       let ut = null;
       try {
         ut = i.combat.playerShot(Ie, ze, { damage: loadout.damage, range: loadout.range });
@@ -3065,7 +3066,9 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
       const shotColors = ve.ravenIceEffects?.() ? ashfallM416.shotColors : null;
       let nn = i.fx;
       (nn &&
-        (nn.tracer && nn.tracer(We, Ne, shotColors ? { color: shotColors.tracer, coreColor: shotColors.core, trail: false } : undefined),
+        ((shotColors && nn.iceShot
+          ? nn.iceShot(We, Ne, ze, { tracer: shotColors.tracer, core: shotColors.core, ads: k.adsE })
+          : nn.tracer && nn.tracer(We, Ne, shotColors ? { color: shotColors.tracer, coreColor: shotColors.core, trail: false } : undefined)),
         nn.shell &&
           (Pe(mi.eject, dt),
           xe
@@ -3199,13 +3202,16 @@ vObjP = position; vONrm = normal; vWNrm = normalize(mat3(modelMatrix) * normal);
             i.fx.smoke &&
             ((k.smokeTick = 0.085),
             Re(We),
-            i.fx.smoke(We, {
-              size: 0.1 + k.smoke * 0.06,
-              life: 1.3,
-              rise: 0.5,
-              count: 1,
-              alpha: 0.22,
-            }))),
+            (ve.ravenIceEffects?.() && i.fx.iceMist
+              ? i.fx.iceMist(We, ze, { count: 2, size: 0.09 + k.smoke * 0.04, speed: 0.8, spread: 0.7, life: 1.6, alpha: 0.2, sink: 0.15 })
+              : i.fx.smoke(We, {
+                  size: 0.1 + k.smoke * 0.06,
+                  life: 1.3,
+                  rise: 0.5,
+                  count: 1,
+                  alpha: 0.22,
+                }))
+          )),
         (k.heat = Math.max(0, k.heat - Me * 0.2)));
       let Os = !!be.ads && !k.reload && k.sprintT < 0.35;
       ((k.adsLin = Zn(k.adsLin + (Os ? Me : -Me) / 0.18, 0, 1)),

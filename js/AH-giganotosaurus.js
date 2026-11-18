@@ -225,6 +225,7 @@
         }
       }
 
+      game.woodAnkylos?.cone(origin, forward, reach, hitWidth, coneSlope, 34 * dt);
       const player = game.lan?.target(model.position) || game.player;
       target.copy(player.pos);
       target.y += .9;
@@ -245,6 +246,7 @@
       point.subVectors(target, origin);
       const distance = point.length();
       forward.set(Math.sin(model.rotation.y), 0, Math.cos(model.rotation.y));
+      game.woodAnkylos?.bite(origin, model.position, forward, scale, 32);
       const depth = point.dot(forward);
       const lateral = Math.abs(point.x * forward.z - point.z * forward.x);
       const underHead = target.distanceToSquared(model.position) < (2.9 * scale) ** 2;
@@ -267,6 +269,12 @@
 
     return {
       reset,
+      // SPINO_BOUND_GIGA_DEATH_V1: scripted cleanup also applies during the spawn intro.
+      endWithSpino() {
+        if (!enemy.alive) return;
+        state = "move";
+        enemy.damage(enemy.hp, enemy.pos);
+      },
 
       lanSnapshot() {
         if (!model.visible) return null;

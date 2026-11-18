@@ -6,11 +6,12 @@
   const spinoWalkRig = /*@inline:data/spino-walk-rig.json*/ null;
   const spinoWalkData = { ...spinoRigV2, ...spinoWalkRig };
   const spinoDeathRigData = /*@inline:data/spino-death-rig.json*/ null;
+  const SPINO_ATTACK_RANGE_SCALE = 2;
   const SPINO_ATTACKS = {
     newBeam: { clip: "Beam Charge New", state: "beam" },
     oldBeam: { clip: "Beam Charge", state: "beam" },
-    newFire: { clip: "Roar New", state: "lightning", range: 33 },
-    oldFire: { clip: "Roar", state: "fire", range: 33 },
+    newFire: { clip: "Roar New", state: "lightning", range: 33 * SPINO_ATTACK_RANGE_SCALE },
+    oldFire: { clip: "Roar", state: "fire", range: 33 * SPINO_ATTACK_RANGE_SCALE },
   };
 
   async function setupSpinosaurus(game) {
@@ -70,7 +71,7 @@
     const audio = (cue, pos = mouth, variant = 0) => game.events.emit("spino:audio", { cue, pos, variant });
     let roarVariant = 0;
     const arena = game.level.arena;
-    const beamRange = arena ? 2 * Math.hypot(arena.A, arena.B) + 12 : 160;
+    const beamRange = (arena ? 2 * Math.hypot(arena.A, arena.B) + 12 : 160) * SPINO_ATTACK_RANGE_SCALE;
     const summons = new Map();
     let summonKind = null, damageMultiplier = 1;
     const beamOn = 3.71, beamOff = 5.85;
@@ -184,6 +185,7 @@
       return Math.abs(turn) < .2;
     }
     function damageInJet(dir, reach, radius, slope, damage, dt) {
+      game.woodAnkylos?.cone(mouth, dir, reach, radius, slope, damage * damageMultiplier * dt);
       offset.subVectors(target, mouth);
       const depth = offset.dot(dir);
       const distance = offset.length();
@@ -207,7 +209,7 @@
       const duration = action.time - 3.1;
       for (const arc of lightningArcs) {
         arc.direction.copy(direction).applyAxisAngle(up, arc.angle);
-        const limit = Math.min(35, .8 + duration * 42) * (arc.angle ? .84 : 1);
+        const limit = Math.min(35, .8 + duration * 42) * SPINO_ATTACK_RANGE_SCALE * (arc.angle ? .84 : 1);
         const hit = cast(mouth, arc.direction, limit);
         const reach = hit?.dist ?? limit;
         arc.end.copy(mouth).addScaledVector(arc.direction, reach);
@@ -396,8 +398,9 @@
             if (state === "lightning") {
               fireRoarLightning(dt);
             } else {
-              const hit = cast(mouth, direction, 35);
-              const reach = Math.min(hit?.dist ?? 35, .8 + (action.time - 3.1) * 36);
+              const limit = 35 * SPINO_ATTACK_RANGE_SCALE;
+              const hit = cast(mouth, direction, limit);
+              const reach = Math.min(hit?.dist ?? limit, (.8 + (action.time - 3.1) * 36) * SPINO_ATTACK_RANGE_SCALE);
               game.fx?.flameJet?.(mouth, direction, { dt, reach, red: true, scale: 1.75, slope: .38,
                 hit: hit && reach >= hit.dist - .01 ? hit.point : null, normal: hit?.normal });
               damageInJet(direction, reach, 1.3, .38, 34, dt);
