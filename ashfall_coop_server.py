@@ -21,20 +21,17 @@ PEER_STALE_AFTER = 3
 
 
 def newest_snapshots(packets):
-    latest = {}
-    decoded = []
-    for index, raw in enumerate(packets):
-        try:
-            packet = json.loads(raw)
-            kind = packet.get("type") if isinstance(packet, dict) else None
-        except (ValueError, TypeError):
-            kind = None
-        decoded.append(kind)
-        if kind in ("world", "pose"):
-            latest[kind] = index
+    """Chỉ giữ pose mới nhất; giữ tối đa 12 world gần nhất (guest cần nhiều bản để nội suy)."""
+    kinds = []
+    for raw in packets:
+        head = raw[:24]
+        kinds.append("world" if '"type":"world"' in head else "pose" if '"type":"pose"' in head else None)
+    last_pose = max((i for i, kind in enumerate(kinds) if kind == "pose"), default=-1)
+    keep_worlds = {i for i, kind in enumerate(kinds) if kind == "world"}
+    keep_worlds = set(sorted(keep_worlds)[-12:])
     return [
-        raw for index, raw in enumerate(packets)
-        if decoded[index] not in ("world", "pose") or latest[decoded[index]] == index
+        raw for i, raw in enumerate(packets)
+        if kinds[i] is None or (kinds[i] == "pose" and i == last_pose) or (kinds[i] == "world" and i in keep_worlds)
     ]
 
 

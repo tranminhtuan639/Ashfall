@@ -143,10 +143,11 @@
     });
 
     const session = { state: "title", update, start() {} };
-    let role, credentials, generation = 0, outbound = [], snapshotOut = null, connected = false, lanPing = 0;
+    let role, credentials, generation = 0, outbound = [], poseOut = null, worldQueue = [], connected = false, lanPing = 0;
     let lastPoll = 0, retrySince = null, peerActive = true;
     let synced = false, nextSend = 0, nextShotBudgetAt = 0, shotBudget = 3;
     let reason = "", nextDeploy = 0, lastGuestHit = 0, displayedEnd = false;
+    let snapshots = [], eventQueue = [], renderTs = null, latestTs = 0, appliedSeq = -1, snapshotSeq = 0;
 
     const ui = document.createElement("section");
     ui.className = "arena-lan";
@@ -223,7 +224,7 @@
       for (let index = 0; index < packets.length; index++) {
         try {
           const type = JSON.parse(packets[index]).type;
-          if (type === "world" || type === "pose") latest.set(type, index);
+          if (type === "pose") latest.set(type, index);
         } catch {}
       }
       return packets.filter((raw, index) => {
@@ -235,11 +236,14 @@
     }
     function send(packet) {
       if (!connected) return;
+      if (role === "host") packet.ts = performance.now();
       const raw = JSON.stringify(packet, (_, value) =>
         typeof value === "number" && !Number.isInteger(value) ? Number(value.toFixed(4)) : value);
-      // world/pose: chỉ giữ bản mới nhất và luôn gửi ĐẦU TIÊN, không xếp sau đống cue.
-      if (packet.type === "world" || packet.type === "pose") {
-        snapshotOut = raw;
+      // pose: chỉ cần bản mới nhất. world: giữ NHIỀU bản (guest phát lại theo timeline của host).
+      if (packet.type === "pose") { poseOut = raw; return; }
+      if (packet.type === "world") {
+        worldQueue.push(raw);
+        if (worldQueue.length > 10) worldQueue.shift();
         return;
       }
       // tiếng bước chân/thở... mất vài gói không sao, đừng để nó làm nghẽn hàng đợi.
@@ -255,7 +259,9 @@
       connected = synced = remote.alive = avatar.visible = false;
       spectatorYaw = null;
       outbound = [];
-      snapshotOut = null;
+      poseOut = null;
+      worldQueue = [];
+      resetTimeline();
       session.state = "title";
       player.enabled = false;
       input.setGameplay?.(false);
@@ -320,6 +326,7 @@
       nextShotBudgetAt = performance.now();
       shotBudget = 3;
       persistentAudio.clear();
+      resetTimeline();
       game.enemies.clear();
       clearReplicas();
       lastGuestHit = remote.hit = 0;
@@ -426,6 +433,14 @@
         takeShot(1, remote.eye, shotDirection.normalize(), { damage: peerWeapon().damage, range: peerWeapon().range });
         return;
       }
+      if (packet.type === "world") { pushSnapshot(packet); return; }
+      if (renderTs !== null && Number.isFinite(packet.ts)) {
+        if (eventQueue.length < 400) eventQueue.push(packet);
+        return;
+      }
+      applyGuestPacket(packet);
+    }
+    function applyGuestPacket(packet) {
       if (packet.type === "trace" && packet.index === 0 && Array.isArray(packet.from) && Array.isArray(packet.to)) {
         game.fx?.tracer?.(origin.fromArray(packet.from), endpoint.fromArray(packet.to));
         return;
@@ -458,56 +473,146 @@
         game.audio?.play?.("sentry_shot", { pos: from, gain: .65 });
         return;
       }
-      if (packet.type !== "world" || !viewPacket(packet.hostPose)) return;
+    }
+
+    // ---- Guest playback: buffer host snapshots and replay them on the host's own timeline ----
+    const lerp = (x, y, t) => x + (y - x) * t;
+    const lerpAngle = (x, y, t) => x + Math.atan2(Math.sin(y - x), Math.cos(y - x)) * t;
+    const lerpVec = (x, y, t, limit = 6) => {
+      if (!x || !y) return x || y;
+      const d2 = (x[0] - y[0]) ** 2 + (x[1] - y[1]) ** 2 + (x[2] - y[2]) ** 2;
+      return d2 > limit * limit ? x : x.map((value, index) => lerp(value, y[index], t));
+    };
+    const interpDelay = () => Math.min(450, Math.max(110, lanPing + 60));
+    function resetTimeline() {
+      snapshots = [];
+      eventQueue = [];
+      renderTs = null;
+      latestTs = 0;
+      appliedSeq = -1;
+    }
+    function blendBoss(sa, sb, t) {
+      if (!sa || !sb || sa[6] !== sb[6] || sa[4] !== sb[4] ||
+          sa[7]?.[0] !== sb[7]?.[0] || sa[7]?.[1] !== sb[7]?.[1]) return sa;
+      const next = sa.slice();
+      next[0] = lerpVec(sa[0], sb[0], t, 12);
+      next[1] = lerpAngle(sa[1], sb[1], t);
+      if (sb[5] >= sa[5]) next[5] = lerp(sa[5], sb[5], t);
+      return next;
+    }
+    function blendWorld(a, b, t) {
+      const out = { ...a };
+      const pa = a.hostPose, pb = b.hostPose;
+      if (pa?.position && pb?.position) {
+        out.hostPose = { ...pa, position: lerpVec(pa.position, pb.position, t),
+          eye: lerpVec(pa.eye, pb.eye, t), yaw: lerpAngle(pa.yaw, pb.yaw, t), pitch: lerp(pa.pitch, pb.pitch, t) };
+      }
+      if (Array.isArray(a.raptors) && Array.isArray(b.raptors)) {
+        out.raptors = a.raptors.map((sa, index) => {
+          const sb = b.raptors[index];
+          if (!sa || !sb || sa.run !== sb.run) return sa;
+          return { ...sa, position: lerpVec(sa.position, sb.position, t), yaw: lerpAngle(sa.yaw, sb.yaw, t) };
+        });
+      }
+      if (Array.isArray(a.gigas) && Array.isArray(b.gigas)) {
+        out.gigas = a.gigas.map((sa, index) => blendBoss(sa, b.gigas[index], t));
+      }
+      out.spino = blendBoss(a.spino, b.spino, t);
+      if (Array.isArray(a.ankylos) && Array.isArray(b.ankylos)) {
+        out.ankylos = a.ankylos.map(da => {
+          const db = b.ankylos.find(item => item[0] === da[0]);
+          if (!db) return da;
+          const next = da.slice();
+          next[1] = lerpVec(da[1], db[1], t, 12);
+          next[3] = lerpAngle(da[3], db[3], t);
+          next[4] = lerp(da[4], db[4], t);
+          next[5] = lerpAngle(da[5], db[5], t);
+          next[6] = lerp(da[6], db[6], t);
+          return next;
+        });
+      }
+      return out;
+    }
+    function pushSnapshot(packet) {
+      if (!Number.isFinite(packet.ts)) { packet.playSeq = ++snapshotSeq; applyWorld(packet, true); return; }
+      const last = snapshots[snapshots.length - 1];
+      if (last && packet.ts <= last.ts) return;
+      packet.playSeq = ++snapshotSeq;
+      snapshots.push(packet);
+      latestTs = packet.ts;
+      if (snapshots.length > 120) snapshots.splice(0, snapshots.length - 120);
+    }
+    function playback(dt) {
+      if (!snapshots.length) return;
+      const delay = interpDelay();
+      if (renderTs === null || latestTs - renderTs > 1500) renderTs = latestTs - delay;
+      const buffered = latestTs - renderTs;
+      const rate = Math.min(1.5, Math.max(.5, 1 + (buffered - delay) / 600));
+      renderTs = Math.min(latestTs, renderTs + dt * 1000 * rate);
+      let index = 0;
+      while (index + 1 < snapshots.length && snapshots[index + 1].ts <= renderTs) index++;
+      if (index) snapshots.splice(0, index);
+      const a = snapshots[0], b = snapshots[1];
+      const t = b && renderTs > a.ts ? Math.min(1, (renderTs - a.ts) / (b.ts - a.ts)) : 0;
+      const fresh = appliedSeq !== a.playSeq;
+      appliedSeq = a.playSeq;
+      applyWorld(t > 0 ? blendWorld(a, b, t) : a, fresh);
+      while (eventQueue.length && eventQueue[0].ts <= renderTs) applyGuestPacket(eventQueue.shift());
+    }
+    function applyWorld(packet, fresh) {
+      if (!viewPacket(packet.hostPose)) return;
       synced = true;
-      phase = packet.phase;
-      reason = packet.reason;
-      worldHud.wave = packet.wave;
-      worldHud.stage = packet.stage;
-      remote.alive = packet.hostAlive;
-      const reviveId = packet.guestReviveId;
-      guestReviveSeconds = Number.isFinite(packet.guestReviveSeconds) ? packet.guestReviveSeconds : null;
-      if (Number.isSafeInteger(reviveId) && reviveId > guestAppliedRevive) {
-        guestAppliedRevive = reviveId;
-        respawn();
-      } else if (reviveId == null && packet.stageStarted > guestStage && !player.alive && phase !== "defeat") {
-        respawn();
-      }
-      guestStage = Math.max(guestStage, packet.stageStarted || 0);
-      if (transportReady !== packet.transportReady) {
-        transportReady = packet.transportReady;
-        transport.setReady(transportReady);
-      }
-      if (Number.isFinite(packet.guestHealth)) {
-        if (packet.guestHit !== lastGuestHit || (packet.guestHealth <= 0 && player.alive)) {
-          lastGuestHit = packet.guestHit;
-          player.damage(Math.max(0, player.health - packet.guestHealth), remote.pos);
+      if (fresh) {
+        phase = packet.phase;
+        reason = packet.reason;
+        worldHud.wave = packet.wave;
+        worldHud.stage = packet.stage;
+        remote.alive = packet.hostAlive;
+        const reviveId = packet.guestReviveId;
+        guestReviveSeconds = Number.isFinite(packet.guestReviveSeconds) ? packet.guestReviveSeconds : null;
+        if (Number.isSafeInteger(reviveId) && reviveId > guestAppliedRevive) {
+          guestAppliedRevive = reviveId;
+          respawn();
+        } else if (reviveId == null && packet.stageStarted > guestStage && !player.alive && phase !== "defeat") {
+          respawn();
         }
-        if (player.alive) player.health = packet.guestHealth;
+        guestStage = Math.max(guestStage, packet.stageStarted || 0);
+        if (transportReady !== packet.transportReady) {
+          transportReady = packet.transportReady;
+          transport.setReady(transportReady);
+        }
+        if (Number.isFinite(packet.guestHealth)) {
+          if (packet.guestHit !== lastGuestHit || (packet.guestHealth <= 0 && player.alive)) {
+            lastGuestHit = packet.guestHit;
+            player.damage(Math.max(0, player.health - packet.guestHealth), remote.pos);
+          }
+          if (player.alive) player.health = packet.guestHealth;
+        }
+        sentries.lanApply(packet.sentries);
+        requiredGigas = packet.gigas.length;
+        ensureReserve();
+        remoteFlames = packet.flames;
+        for (const beam of replicaBeams.values()) beam.frame = null;
+        for (const [id, frame] of packet.beams) {
+          const [yellow, bolts] = frame;
+          let beam = replicaBeams.get(id);
+          if (!beam) {
+            beam = createSpinoBeamFx(game, yellow, bolts, true);
+            replicaBeams.set(id, beam);
+          }
+          beam.frame = frame;
+        }
+        for (const [key, method] of [["objective", "setObjective"], ["countdown", "setStageCountdown"], ["truck", "setTransportHealth"], ["boss", "setBossHealth"]]) {
+          if (packet.hud[key]) hud[method](...packet.hud[key]);
+        }
       }
+      // Moving parts are re-applied every frame from the interpolated snapshot.
       if (Array.isArray(packet.raptors)) packet.raptors.forEach((snapshot, index) => {
         if (snapshot) raptors[index]?.lanApply(snapshot);
       });
-      sentries.lanApply(packet.sentries);
       packet.gigas.forEach((snapshot, index) => game.gigas[index]?.lanApply(snapshot));
       game.spino.lanApply(packet.spino);
-      requiredGigas = packet.gigas.length;
-      ensureReserve();
       frameAnkylos = packet.ankylos;
-      remoteFlames = packet.flames;
-      for (const beam of replicaBeams.values()) beam.frame = null;
-      for (const [id, frame] of packet.beams) {
-        const [yellow, bolts] = frame;
-        let beam = replicaBeams.get(id);
-        if (!beam) {
-          beam = createSpinoBeamFx(game, yellow, bolts, true);
-          replicaBeams.set(id, beam);
-        }
-        beam.frame = frame;
-      }
-      for (const [key, method] of [["objective", "setObjective"], ["countdown", "setStageCountdown"], ["truck", "setTransportHealth"], ["boss", "setBossHealth"]]) {
-        if (packet.hud[key]) hud[method](...packet.hud[key]);
-      }
     }
 
     function ensureReserve() {
@@ -530,8 +635,10 @@
       if (epoch !== generation || !credentials) return;
       let data;
       try {
-        const packets = outbound.splice(0, snapshotOut ? 31 : 32);
-        if (snapshotOut) { packets.unshift(snapshotOut); snapshotOut = null; }
+        const packets = [];
+        if (poseOut) { packets.push(poseOut); poseOut = null; }
+        packets.push(...worldQueue.splice(0, 8));
+        packets.push(...outbound.splice(0, 32 - packets.length));
         const sentAt = performance.now();
         data = await api("poll", { ...credentials, packets });
         lanPing = Math.round(performance.now() - sentAt);
@@ -544,7 +651,8 @@
         }
         retrySince ??= performance.now();
         outbound = [];
-        snapshotOut = null;
+        poseOut = null;
+        worldQueue = [];
         if (performance.now() - retrySince >= 120000) {
           leave("Mất kết nối tới relay quá lâu. Kiểm tra máy Host rồi tạo phòng mới.");
           return;
@@ -679,6 +787,7 @@
         flameFrames = [];
         if (running) simulate(dt, now);
       } else {
+        playback(dt);
         game.enemies.lanApply(frameAnkylos, dt);
         drawRemoteEffects(dt);
         for (const unit of raptors) unit.lanAnimate(dt);

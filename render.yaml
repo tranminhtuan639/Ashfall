@@ -2,6 +2,7 @@ services:
   - type: web
     name: ashfall-coop
     runtime: python
+    region: singapore
     plan: free
     numInstances: 1
     buildCommand: "python build.py && test -s dist/index.html && python -m py_compile ashfall_coop_server.py"
